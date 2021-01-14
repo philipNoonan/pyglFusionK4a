@@ -27,6 +27,17 @@ from pyk4a import ImageFormat
 
 from helpers import colorize, convert_to_bgra_if_required
 
+import torch
+import torchvision
+import utils
+
+from PIL import Image, ImageOps
+from torchvision.transforms import transforms as transforms
+
+
+
+
+
 def createTexture(texture, target, internalFormat, levels, width, height, depth, minFilter, magFilter):
 
     if texture == -1:
@@ -294,6 +305,18 @@ def render(VAO, window, shaderDict, textureDict):
 
 def main():
 
+    # transform to convert the image to tensor
+    transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+    # initialize the model
+    model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
+                                                                num_keypoints=17)
+    # set the computation device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # load the modle on to the computation device and set to eval mode
+    model.to(device).eval()
+
     # initialize glfw
     if not glfw.init():
         return
@@ -446,6 +469,19 @@ def main():
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(depthWidth), int(depthHeight), GL_RED, GL_UNSIGNED_SHORT, capture.depth)
 
         except EOFError:
+            break
+
+        smallMat = cv2.pyrDown(colorMat)
+        rotMat = cv2.flip(smallMat, 0)
+
+        pil_image = Image.fromarray(rotMat).convert('RGB')
+        image = transform(pil_image)
+        image = image.unsqueeze(0).to(device)
+        with torch.no_grad():
+            outputs = model(image)
+        output_image = utils.draw_keypoints(outputs, rotMat)
+        cv2.imshow('Face detection frame', output_image)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
         bilateralFilter(shaderDict, textureDict, depthWidth, depthHeight)

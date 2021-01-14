@@ -1,3 +1,4 @@
-include pyglFusion/app/shaders/*.comp
-include pyglFusion/app/shaders/*.vert
-include pyglFusion/app/shaders/*.frag
+include pyglFusion/shaders/*.comp
+include pyglFusion/shaders/*.vert
+include pyglFusion/shaders/*.frag
+include pyglFusionK4A/models/
