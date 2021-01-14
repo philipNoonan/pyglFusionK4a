@@ -1,0 +1,98 @@
+#version 430
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+// bind images
+layout(binding = 0, rgba32f) readonly uniform image2D srcVertexMap;
+layout(binding = 1, rgba8) readonly uniform image2D srcColorMap;
+layout(binding = 2, rgba8) writeonly uniform image2D dstColorMap;
+
+layout(binding = 3, rg16ui) uniform uimage2D mappingC2DMap;
+layout(binding = 4, rg16ui) uniform uimage2D mappingD2CMap;
+
+uniform int functionID;
+uniform mat4 d2c;
+uniform vec4 cam;
+
+//uniform vec4 distort1; // k1, k2, k3, k4
+//uniform vec4 distort2; // k5, k6, p1, p2 <- check if p1 and p2 are correct way around
+
+vec3 projectPointImage(vec3 p)
+{
+    return vec3(((cam.z * p.x) / p.z) + cam.x,
+                ((cam.w * p.y) / p.z) + cam.y,
+                p.z);
+}
+
+void wipeMapping()
+{
+	ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+	imageStore(mappingC2DMap, pix, uvec4(0)); // a large number?
+ 	imageStore(mappingD2CMap, pix, uvec4(0)); // a large number?
+}
+
+void align()
+{
+	ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+	//imageStore(mappingMap, ivec2(pix.xy), uvec4(10000, 0, 0, 0));
+
+	vec4 vertex = imageLoad(srcVertexMap, pix);
+
+	vec4 vertexInColor = d2c * vertex;
+
+	vec3 colPix = projectPointImage(vertexInColor.xyz);
+
+	if (vertex.z == 0 || isnan(vertex.z))
+	{
+		imageStore(dstColorMap, pix, vec4(1)); 
+		return;
+	}
+	if (any(lessThan(colPix.xy, vec2(0))) || any(greaterThan(colPix.xy, vec2(imageSize(srcColorMap).xy))))
+	{
+		imageStore(dstColorMap, pix, vec4(0,0,0,1.0)); 
+
+	}
+	else
+	{
+		imageStore(dstColorMap, pix, imageLoad(srcColorMap, ivec2(colPix.x + 0.5f, colPix.y + 0.5f))); 
+
+		// when this is a blank mapping pixel, both prev will be uvec4(0)
+		// when some other invocation has written to either pixel, it will contain a uvec4(color, depth)
+		//uvec4 prevPix = imageLoad(mappingMap, ivec2(pix));
+		//uvec4 prevColPix = imageLoad(mappingMap, ivec2(colPix.xy));
+
+		//if (prevPix.x == 10000)
+		//{
+		//	imageStore(mappingMap, ivec2(pix.xy), uvec4(colPix.xy, pix.xy));
+		//	imageStore(mappingMap, ivec2(colPix.xy), uvec4(colPix.xy, pix.xy));
+		//}
+		//else
+		//{
+			imageStore(mappingD2CMap, ivec2(pix.xy), uvec4(colPix.xy, 0, 0));
+			imageStore(mappingC2DMap, ivec2(colPix.xy), uvec4(pix.xy, 0, 0));
+		//}
+
+
+
+	}
+	
+
+
+	//imageStore(dstColorMap, pix, vec4(vertex.xyz, 1.0f)); 
+}
+
+
+void main()
+{
+	if (functionID == 0)
+	{
+		wipeMapping();
+	}
+	else if (functionID == 1)
+	{
+		align();
+	}
+
+
+
+}

@@ -1,0 +1,3 @@
+include pyglFusion/app/shaders/*.comp
+include pyglFusion/app/shaders/*.vert
+include pyglFusion/app/shaders/*.frag
