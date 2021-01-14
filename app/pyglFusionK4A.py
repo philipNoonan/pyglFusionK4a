@@ -34,6 +34,8 @@ import utils
 from PIL import Image, ImageOps
 from torchvision.transforms import transforms as transforms
 
+import time
+
 
 
 
@@ -88,11 +90,11 @@ def generateTextures(textureDict, colwidth, colheight, depwidth, depheight):
     textureDict['mappingC2D'] = createTexture(textureDict['mappingC2D'], GL_TEXTURE_2D, GL_RG16, 3, int(colwidth), int(colheight), 1, GL_NEAREST, GL_NEAREST)
     textureDict['mappingD2C'] = createTexture(textureDict['mappingD2C'], GL_TEXTURE_2D, GL_RG16, 3, int(colwidth), int(colheight), 1, GL_NEAREST, GL_NEAREST)
 
-    textureDict['lastVertex'] = createTexture(textureDict['lastVertex'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['nextVertex'] = createTexture(textureDict['nextVertex'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['refVertex'] = createTexture(textureDict['refVertex'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['virtualVertex'] = createTexture(textureDict['virtualVertex'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     
-    textureDict['nextNormal'] = createTexture(textureDict['nextNormal'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['lastNormal'] = createTexture(textureDict['lastNormal'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['refNormal'] = createTexture(textureDict['refNormal'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['virtualNormal'] = createTexture(textureDict['virtualNormal'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
     textureDict['volume'] = createTexture(textureDict['volume'], GL_TEXTURE_3D, GL_RG16F, 1, 128, 128, 128, GL_NEAREST, GL_NEAREST)
 
@@ -154,7 +156,7 @@ def alignDepthColor(shaderDict, textureDict, colorWidth, colorHeight, depthWidth
 
     glBindImageTexture(0, textureDict['filteredDepth'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F) 
     glBindImageTexture(1, textureDict['lastColor'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F) 
-    glBindImageTexture(2, textureDict['lastVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(2, textureDict['refVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
     compWidth = int((width/32.0)+0.5)
     compHeight = int((height/32.0)+0.5)
@@ -168,7 +170,7 @@ def depthToVertex(shaderDict, textureDict, width, height):
 
     glBindImageTexture(0, textureDict['filteredDepth'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F) 
     glBindImageTexture(1, textureDict['xyLUT'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F) 
-    glBindImageTexture(2, textureDict['lastVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(2, textureDict['refVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
     glUniform1f(glGetUniformLocation(shaderDict['depthToVertexShader'], "minDepth"), 0.001)
     glUniform1f(glGetUniformLocation(shaderDict['depthToVertexShader'], "maxDepth"), 10.0)
@@ -185,8 +187,8 @@ def vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight):
 
     glUseProgram(shaderDict['vertexToNormalShader'])
 
-    glBindImageTexture(0, textureDict['lastVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
-    glBindImageTexture(1, textureDict['lastNormal'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(0, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(1, textureDict['refNormal'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
     compWidth = int((depthWidth/32.0)+0.5)
     compHeight = int((depthHeight/32.0)+0.5)
@@ -201,60 +203,72 @@ def vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight):
 #def p2pGetReduction():        
 
 
-def raycastVolume(shaderDict, textureDict, depthWidth, depthHeight):
-    glUseProgram(shaderDict['raycastShader'])
+def raycastVolume(shaderDict, textureDict, fusionConfig):
+    glUseProgram(shaderDict['raycastVolumeShader'])
 
     glBindImageTexture(0, textureDict['volume'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG16F) 
     glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
     glBindImageTexture(1, textureDict['refNormal'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
-    glUniform1f(glGetUniformLocation(shaderDict['raycastShader'], "nearPlane"), 0.001)
-    glUniform1f(glGetUniformLocation(shaderDict['raycastShader'], "farPlane"), 0.001)
-    glUniform1f(glGetUniformLocation(shaderDict['raycastShader'], "step"), 0.001)
-    glUniform1f(glGetUniformLocation(shaderDict['raycastShader'], "largeStep"), 0.001)
-    glUniform3f(glGetUniformLocation(shaderDict['raycastShader'], "volDim"), 1.0, 1.0, 1.0)
-    glUniform3f(glGetUniformLocation(shaderDict['raycastShader'], "volSize"), 128.0, 128.0, 128.0)
+    glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "nearPlane"), fusionConfig['nearPlane'])
+    glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "farPlane"), fusionConfig['farPlane'])
+    glUniform3f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volDim"), fusionConfig['volDim'][0], fusionConfig['volDim'][1], fusionConfig['volDim'][2])
+    glUniform3f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volSize"), fusionConfig['volSize'][0], fusionConfig['volSize'][1], fusionConfig['volSize'][2])
 
-    compWidth = int((depthWidth/32.0)+0.5)
-    compHeight = int((depthHeight/32.0)+0.5)
+    step = np.max(fusionConfig['volDim']) / np.max(fusionConfig['volSize'])
+    largeStep = 0.375 # dont know why
+    #dMin = -fusionConfig['volDim'][0] / 20.0
+    #dMax = fusionConfig['volDim'][0] / 10.0
+    glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "step"), step)
+    glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "largeStep"), largeStep)
+
+    compWidth = int((fusionConfig['volSize'][0]/32.0)+0.5) 
+    compHeight = int((fusionConfig['volSize'][1]/32.0)+0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
+def integrateVolume(shaderDict, textureDict):
+    glUseProgram(shaderDict['integrateShader'])
 
-def runP2P():
+
+def runP2P(shaderDict, textureDict, bufferDict, fusionConfig, currPose, integrateFlag):
     ICPiters = 10, 5, 2
     pose = np.array((4, 4), dtype = 'float')
-    raycastVolume()
+    raycastVolume(shaderDict, textureDict, fusionConfig)
+
     for level in range(3):
         for iter in range(ICPiters[level]):
             A = np.array((6, 6), dtype = 'double')
             b = np.array((6, 1), dtype = 'double')
             
-            p2pTrack(textureDict, bufferDict, currPose, level)
+            # p2pTrack(textureDict, bufferDict, currPose, level)
 
-            p2pReduce(bufferDict)
+            # p2pReduce(bufferDict)
 
-            A, b, AE, icpCount = p2pGetReduction(bufferDict)
+            # A, b, AE, icpCount = p2pGetReduction(bufferDict)
 
-            result = np.array((6, 1), dtype = 'double')
+            # result = np.array((6, 1), dtype = 'double')
 
-            result = linalg.solve(A, b)
+            # result = linalg.solve(A, b)
 
-            deltaR = R.from_rotvec(result[3], result[4], result[5])
-            delta = np.array((4, 4), dtype = 'float')
-            delta[:3, :3] = deltaR.as_matrix()
+            # deltaR = R.from_rotvec(result[3], result[4], result[5])
+            # delta = np.array((4, 4), dtype = 'float')
+            # delta[:3, :3] = deltaR.as_matrix()
 
-            delta[3, 0] = result[0]
-            delta[3, 1] = result[1]
-            delta[3, 2] = result[2]
+            # delta[3, 0] = result[0]
+            # delta[3, 1] = result[1]
+            # delta[3, 2] = result[2]
 
-            pose = delta * pose
+            # pose = delta * pose
 
-            resNorm = linalg.norm(result)
+            # resNorm = linalg.norm(result)
 
-            if (resNorm < 1e-5 and resNorm != 0):
-                break
+            # if (resNorm < 1e-5 and resNorm != 0):
+            #     break
+
+    #if integrateFlag == True:
+    #    integrateVolume(shaderDict, textureDict)
 
 
 def render(VAO, window, shaderDict, textureDict):
@@ -279,13 +293,12 @@ def render(VAO, window, shaderDict, textureDict):
     glUniform2f(glGetUniformLocation(shaderDict['renderShader'], "depthRange"), 0.0, 5.0)
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
-
     #render normals
     opts = 0 << 0 | 1 << 1 | 0 << 2 | 0 << 3 | 0 << 4
     xpos = w / 3.0
     glViewport(int(xpos), int(ypos), int(xwidth),h)
     glActiveTexture(GL_TEXTURE1)
-    glBindTexture(GL_TEXTURE_2D, textureDict['lastNormal'])
+    glBindTexture(GL_TEXTURE_2D, textureDict['refNormal'])
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "isYFlip"), 0)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderType"), 0)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderOptions"), opts)
@@ -429,19 +442,32 @@ def main():
         'filteredDepth' : -1,
         'lastDepth' : -1,
         'nextDepth' : -1,
-        'lastVertex' : -1,
-        'nextVertex' : -1,
-        'lastNormal' : -1,
-        'nextNormal' : -1,
+        'refVertex' : -1,
+        'virtualVertex' : -1,
+        'refNormal' : -1,
+        'virtualNormal' : -1,
         'mappingC2D' : -1,
         'mappingD2C' : -1,
         'xyLUT' : -1, 
         'volume' : -1
     }
 
+    fusionConfig = {
+        'volSize' : (128, 128, 128),
+        'volDim' : (1.0, 1.0, 1.0),
+        'iters' : (10, 5, 2),
+        'maxWeight' : 100.0,
+        'distThresh' : 0.05,
+        'normThresh' : 0.9,
+        'nearPlane' : 0.1,
+        'farPlane' : 5.0
+    }
+
     textureDict = generateTextures(textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
     colorMat = np.zeros((colorHeight, colorWidth, 3), dtype = "uint8")
     useColorMat = False 
+    integrateFlag = False
+    currPose = np.eye(4, dtype='float')
 
     # LUTs
     createXYLUT(playback, textureDict, depthWidth, depthHeight)
@@ -471,25 +497,28 @@ def main():
         except EOFError:
             break
 
-        smallMat = cv2.pyrDown(colorMat)
-        rotMat = cv2.flip(smallMat, 0)
+        # #smallMat = cv2.pyrDown(colorMat)
+        # rotMat = cv2.flip(colorMat, 0)
 
-        pil_image = Image.fromarray(rotMat).convert('RGB')
-        image = transform(pil_image)
-        image = image.unsqueeze(0).to(device)
-        with torch.no_grad():
-            outputs = model(image)
-        output_image = utils.draw_keypoints(outputs, rotMat)
-        cv2.imshow('Face detection frame', output_image)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        # pil_image = Image.fromarray(rotMat).convert('RGB')
+        # image = transform(pil_image)
+        # image = image.unsqueeze(0).to(device)
+        # #start_time = time.time()
+        # with torch.no_grad():
+        #     outputs = model(image)
+        # #end_time = time.time()
+        # #print((end_time - start_time) * 1000.0)
+        # output_image = utils.draw_keypoints(outputs, rotMat)
+        # cv2.imshow('Face detection frame', output_image)
+        # if cv2.waitKey(1) & 0xFF == ord('q'):
+        #     break
 
         bilateralFilter(shaderDict, textureDict, depthWidth, depthHeight)
         depthToVertex(shaderDict, textureDict, depthWidth, depthHeight)
         #alignDepthColor(alignDepthColorShader, textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
         vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight)
 
-        #runP2P()
+        runP2P(shaderDict, textureDict, bufferDict, fusionConfig, currPose, integrateFlag)
 
         render(VAO, window, shaderDict, textureDict)
 
