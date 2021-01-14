@@ -24,6 +24,7 @@ AddDllDirectory(r"C:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\a
 import pyk4a as k4a
 from pyk4a import PyK4APlayback
 from pyk4a import ImageFormat
+import json
 
 from helpers import colorize, convert_to_bgra_if_required
 
@@ -36,8 +37,29 @@ from torchvision.transforms import transforms as transforms
 
 import time
 
+def createBuffer(buffer, bufferType, size, usage):
+    if buffer == -1:
+        bufName = glGenBuffers(1)
+    else:
+        glDeleteBuffers(1, buffer)
+        bufName = buffer
+        bufName = glGenBuffers(1)
 
+    glBindBuffer(bufferType, bufName)
+    glBufferData(bufferType, size, None, usage)
+    glBindBuffer(bufferType, 0)
 
+    return bufName
+
+def generateBuffers(bufferDict, depthWidth, depthHeight):
+    
+    p2pRedBufSize = depthWidth * depthHeight * 8 * 4 # 8 float32 per depth pixel for reduction struct
+    p2pRedOutBufSize = depthWidth * depthHeight * 8 * 4 # 8 float32 per depth pixel for reduction struct
+
+    bufferDict['p2pReduction'] = createBuffer(bufferDict['p2pReduction'], GL_SHADER_STORAGE_BUFFER, p2pRedBufSize, GL_DYNAMIC_DRAW)
+    bufferDict['p2pRedOut'] = createBuffer(bufferDict['p2pRedOut'], GL_SHADER_STORAGE_BUFFER, p2pRedOutBufSize, GL_DYNAMIC_DRAW)
+
+    return bufferDict
 
 
 def createTexture(texture, target, internalFormat, levels, width, height, depth, minFilter, magFilter):
@@ -98,8 +120,7 @@ def generateTextures(textureDict, colwidth, colheight, depwidth, depheight):
 
     textureDict['volume'] = createTexture(textureDict['volume'], GL_TEXTURE_3D, GL_RG16F, 1, 128, 128, 128, GL_NEAREST, GL_NEAREST)
 
-    #lastFlowMap
-    #textureList[4] = createTexture(textureList[4], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureList['tracking'] = createTexture(textureList['tracking'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_NEAREST, GL_NEAREST)
     #nextFlowMap
     #textureList[5] = createTexture(textureList[5], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     #sparseFlowMap
@@ -196,7 +217,32 @@ def vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight):
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-#def p2pTrack():
+def p2pTrack(shaderDict, textureDict, bufferDict, currPose, level):
+    glUseProgram(shaderDict['trackP2PShader'])
+
+    glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(1, textureDict['refNormal'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F)
+
+    glBindImageTexture(2, textureDict['virtualVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(3, textureDict['virtualNormal'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+
+    glBindImageTexture(4, textureDict['tracking'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pReduction'])
+
+    glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), fusionConfig['level'])
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "K"), 1, False, K)
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invK"), 1, False, np.invert(K))
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "T"), 1, False, currPose)
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invT"), 1, False, np.invert(currPose))
+
+    compWidth = int((depthWidth/32.0)+0.5)
+    compHeight = int((depthHeight/32.0)+0.5)
+
+    glDispatchCompute(compWidth, compHeight, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 #def p2pReduce():
 
@@ -231,18 +277,16 @@ def raycastVolume(shaderDict, textureDict, fusionConfig):
 def integrateVolume(shaderDict, textureDict):
     glUseProgram(shaderDict['integrateShader'])
 
-
 def runP2P(shaderDict, textureDict, bufferDict, fusionConfig, currPose, integrateFlag):
-    ICPiters = 10, 5, 2
     pose = np.array((4, 4), dtype = 'float')
     raycastVolume(shaderDict, textureDict, fusionConfig)
 
-    for level in range(3):
-        for iter in range(ICPiters[level]):
+    for level in range(np.size(fusionConfig['iters']), -1, -1):
+        for iter in range(fusionConfig['iters'][level]):
             A = np.array((6, 6), dtype = 'double')
             b = np.array((6, 1), dtype = 'double')
             
-            # p2pTrack(textureDict, bufferDict, currPose, level)
+            p2pTrack(shaderDict, textureDict, bufferDict, currPose, level)
 
             # p2pReduce(bufferDict)
 
@@ -315,20 +359,19 @@ def render(VAO, window, shaderDict, textureDict):
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderOptions"), opts)
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)   
 
-
 def main():
 
-    # transform to convert the image to tensor
-    transform = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    # initialize the model
-    model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
-                                                                num_keypoints=17)
-    # set the computation device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # load the modle on to the computation device and set to eval mode
-    model.to(device).eval()
+    # # transform to convert the image to tensor
+    # transform = transforms.Compose([
+    #     transforms.ToTensor()
+    # ])
+    # # initialize the model
+    # model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
+    #                                                             num_keypoints=17)
+    # # set the computation device
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # # load the modle on to the computation device and set to eval mode
+    # model.to(device).eval()
 
     # initialize glfw
     if not glfw.init():
@@ -413,9 +456,23 @@ def main():
     raycast_shader = (Path(__file__).parent / 'shaders/raycast.comp').read_text()
     raycastShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(raycast_shader, GL_COMPUTE_SHADER))
 
+    trackP2P_shader = (Path(__file__).parent / 'shaders/p2pTrack.comp').read_text()
+    trackP2PShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(trackP2P_shader, GL_COMPUTE_SHADER))
+
 
     playback = PyK4APlayback("C:\data\outSess1.mkv")
     playback.open()
+
+    cal = json.loads(playback.calibration_raw)
+    depthCal = cal["CalibrationInformation"]["Cameras"][0]["Intrinsics"]["ModelParameters"]
+    colorCal = cal["CalibrationInformation"]["Cameras"][1]["Intrinsics"]["ModelParameters"]
+    # https://github.com/microsoft/Azure-Kinect-Sensor-SDK/blob/61951daac782234f4f28322c0904ba1c4702d0ba/src/transformation/mode_specific_calibration.c
+    # from microsfots way of doing things, you have to do the maths here, rememberedding to -0.5f from cx, cy at the end
+    K = np.eye(4, dtype='float')
+    K[0][0] = depthCal[2] * cal["CalibrationInformation"]["Cameras"][0]["SensorWidth"] # fx
+    K[1][1] = depthCal[3] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"] # fy
+    K[2][0] = (depthCal[0] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"]) - 192.0 - 0.5 # cx
+    K[2][1] = (depthCal[1] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"]) - 180.0 - 0.5 # cy
 
     #playback.configuration["color_format"] == ImageFormat.COLOR_MJPG
     if playback.configuration["depth_mode"] == k4a.DepthMode.NFOV_UNBINNED:
@@ -431,7 +488,8 @@ def main():
     }
 
     bufferDict = {
-
+        'p2pReduction' : -1,
+        'p2pRedOut' : -1
     }
 
     textureDict = {
@@ -449,13 +507,14 @@ def main():
         'mappingC2D' : -1,
         'mappingD2C' : -1,
         'xyLUT' : -1, 
+        'tracking' : -1,
         'volume' : -1
     }
 
     fusionConfig = {
         'volSize' : (128, 128, 128),
         'volDim' : (1.0, 1.0, 1.0),
-        'iters' : (10, 5, 2),
+        'iters' : (2, 5, 10),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
@@ -463,7 +522,17 @@ def main():
         'farPlane' : 5.0
     }
 
+    cameraConfig = {
+        'depthWidth' : 640,
+        'depthHeight' : 576,
+        'colorWidth' : 1920,
+        'colorHeight' : 1080,
+        'K' : 1
+    }
+
     textureDict = generateTextures(textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
+    bufferDict = generateBuffers(bufferDict, depthWidth, depthHeight)
+
     colorMat = np.zeros((colorHeight, colorWidth, 3), dtype = "uint8")
     useColorMat = False 
     integrateFlag = False
@@ -513,12 +582,20 @@ def main():
         # if cv2.waitKey(1) & 0xFF == ord('q'):
         #     break
 
+
+
+
+
         bilateralFilter(shaderDict, textureDict, depthWidth, depthHeight)
         depthToVertex(shaderDict, textureDict, depthWidth, depthHeight)
         #alignDepthColor(alignDepthColorShader, textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
         vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight)
 
         runP2P(shaderDict, textureDict, bufferDict, fusionConfig, currPose, integrateFlag)
+
+
+
+
 
         render(VAO, window, shaderDict, textureDict)
 
