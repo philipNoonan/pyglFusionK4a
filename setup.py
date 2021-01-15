@@ -10,7 +10,8 @@ requirements = [
     'PyOpenGL',
     'opencv-python',
     'imgui',
-    'pyk4a'
+    'pyk4a',
+    'PyGLM'
 ]
 
 setup(

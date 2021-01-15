@@ -12,12 +12,12 @@ uniform float nearPlane;
 uniform float farPlane;
 uniform float step;
 uniform float largeStep;
-uniform vec3 volDim; // VEC3 !!!
-uniform vec3 volSize;
+uniform float volDim;
+uniform float volSize;
 
 vec3 getVolumePosition(uvec3 p)
 {
-    return vec3((p.x + 0.5f) * volDim.x / volSize.x, (p.y + 0.5f) * volDim.y / volSize.y, (p.z + 0.5f) * volDim.z / volSize.z);
+    return vec3((p.x + 0.5f) * volDim / volSize, (p.y + 0.5f) * volDim / volSize, (p.z + 0.5f) * volDim / volSize);
 }
 
 
@@ -48,7 +48,7 @@ float vs(uvec3 pos)
 
 float interpVol(vec3 pos)
 {
-    vec3 scaled_pos = vec3((pos.x * volSize.x / volDim.x) - 0.5f, (pos.y * volSize.y / volDim.y) - 0.5f, (pos.z * volSize.z / volDim.z) - 0.5f);
+    vec3 scaled_pos = vec3((pos.x * volSize / volDim) - 0.5f, (pos.y * volSize / volDim) - 0.5f, (pos.z * volSize / volDim) - 0.5f);
     ivec3 base = ivec3(floor(scaled_pos));
     vec3 factor = fract(scaled_pos);
     ivec3 lower = max(base, ivec3(0));
@@ -63,7 +63,7 @@ float interpVol(vec3 pos)
 
 float interpDistance(vec3 pos, inout bool interpolated)
 {
-    //vec3 scaled_pos = vec3((pos.x * volSize.x / volDim.x) - 0.5f, (pos.y * volSize.y / volDim.y) - 0.5f, (pos.z * volSize.z / volDim.z) - 0.5f);
+    //vec3 scaled_pos = vec3((pos.x * volSize / volDim) - 0.5f, (pos.y * volSize / volDim) - 0.5f, (pos.z * volSize / volDim) - 0.5f);
      
     float i = pos.x;
     float j = pos.y;
@@ -142,10 +142,10 @@ vec4 raycast(uvec2 pos, int camera)
         //float f_t = volume.interp(origin + direction * t); // do a sampler3D?
 
         //vec3 tPos = (origin + direction * t);
-        //vec3 scaled_pos = vec3((tPos.x * volSize.x / volDim.x), (tPos.y * volSize.y / volDim.y), (tPos.z * volSize.z / volDim.z));
+        //vec3 scaled_pos = vec3((tPos.x * volSize / volDim), (tPos.y * volSize / volDim), (tPos.z * volSize / volDim));
         //vec3 base = floor(scaled_pos);
-        // vec4 interpData = texture(volumeDataTexture, vec3(origin + direction * t) / volDim.x); // volume texture reads should just be 0 - 1
-        // ivec4 interpData = texture(volumeDataTexture, base / volSize.x); // volume texture reads should just be 0 - 1
+        // vec4 interpData = texture(volumeDataTexture, vec3(origin + direction * t) / volDim); // volume texture reads should just be 0 - 1
+        // ivec4 interpData = texture(volumeDataTexture, base / volSize); // volume texture reads should just be 0 - 1
 
         //float f_t = interpData.x;
         //float f_t = float(interpData.x) * 0.00003051944088f;
@@ -153,7 +153,7 @@ vec4 raycast(uvec2 pos, int camera)
         float f_t = interpVol(vec3(origin + direction * t));
 
         //vec3 tPos = (origin + direction * t);
-        //vec3 scaled_pos = vec3((tPos.x * volSize.x / volDim.x) - 0.5f, (tPos.y * volSize.y / volDim.y) - 0.5f, (tPos.z * volSize.z / volDim.z) - 0.5f);
+        //vec3 scaled_pos = vec3((tPos.x * volSize / volDim) - 0.5f, (tPos.y * volSize / volDim) - 0.5f, (tPos.z * volSize / volDim) - 0.5f);
         //float f_t = interpDistance(scaled_pos, isInterp);
 
         // float currWeight = 0;
@@ -166,8 +166,8 @@ vec4 raycast(uvec2 pos, int camera)
             for (; t < tfar; t += stepsize)
             {
                 //f_tt = volume.interp(origin + direction * t); // another sampler3d
-                //vec4 d1 = texture(volumeDataTexture, vec3(origin + direction * t) / volDim.x); // if volDim is square!!!
-                //ivec4 d1 = texture(volumeDataTexture, vec3(origin + direction * t) / volDim.x); // if volDim is square!!!
+                //vec4 d1 = texture(volumeDataTexture, vec3(origin + direction * t) / volDim); // if volDim is square!!!
+                //ivec4 d1 = texture(volumeDataTexture, vec3(origin + direction * t) / volDim); // if volDim is square!!!
 
                 //currWeight = d1.z;
                 //f_tt = d1.x;
@@ -176,7 +176,7 @@ vec4 raycast(uvec2 pos, int camera)
                 f_tt = interpVol(vec3(origin + direction * t));
 
                 //tPos = (origin + direction * t);
-                //scaled_pos = vec3((tPos.x * volSize.x / volDim.x) - 0.5f, (tPos.y * volSize.y / volDim.y) - 0.5f, (tPos.z * volSize.z / volDim.z) - 0.5f);
+                //scaled_pos = vec3((tPos.x * volSize / volDim) - 0.5f, (tPos.y * volSize / volDim) - 0.5f, (tPos.z * volSize / volDim) - 0.5f);
                 //f_tt = interpDistance(scaled_pos, isInterp);
 
                 if (f_tt < 0) // got it, jump out of inner loop
@@ -209,7 +209,7 @@ vec4 raycast(uvec2 pos, int camera)
 
 vec3 getGradient(vec4 hit)
 {
-    vec3 scaled_pos = vec3((hit.x * volSize.x / volDim.x) - 0.5f, (hit.y * volSize.y / volDim.y) - 0.5f, (hit.z * volSize.z / volDim.z) - 0.5f);
+    vec3 scaled_pos = vec3((hit.x * volSize / volDim) - 0.5f, (hit.y * volSize / volDim) - 0.5f, (hit.z * volSize / volDim) - 0.5f);
     ivec3 baseVal = ivec3(floor(scaled_pos));
     vec3 factor = fract(scaled_pos);
     ivec3 lower_lower = max(baseVal - ivec3(1), ivec3(0));
@@ -251,7 +251,7 @@ vec3 getGradient(vec4 hit)
         + ((vs(uvec3(lower.x, upper.y, upper_upper.z)) - vs(uvec3(lower.x, upper.y, lower_upper.z))) * (1 - factor.x)
         + (vs(uvec3(upper.x, upper.y, upper_upper.z)) - vs(uvec3(upper.x, upper.y, lower_upper.z))) * factor.x) * factor.y) * factor.z;
 
-    return gradient * vec3(volDim.x / volSize.x, volDim.y / volSize.y, volDim.z / volSize.z) * (0.5f * 0.00003051944088f);
+    return gradient * vec3(volDim / volSize, volDim / volSize, volDim / volSize) * (0.5f * 0.00003051944088f);
 
 
 }
@@ -306,7 +306,7 @@ void main()
 
     //vec3 pos = opMul(invTrack, getVolumePosition(pix));
     //vec3 cameraX = opMul(K, pos);
-    //vec3 delta = rotate(invTrack, vec3(0.0f, 0.0f, volDim.z / volSize.z));
+    //vec3 delta = rotate(invTrack, vec3(0.0f, 0.0f, volDim / volSize));
     //vec3 cameraDelta = rotate(K, delta);
 }
 

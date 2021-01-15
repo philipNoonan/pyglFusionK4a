@@ -1,6 +1,8 @@
 import glfw
 from OpenGL.GL import *
 import OpenGL.GL.shaders
+import glm
+
 import numpy as np
 from scipy import linalg
 from scipy.spatial.transform import Rotation as R
@@ -21,9 +23,10 @@ AddDllDirectory.restype = DWORD
 AddDllDirectory.argtypes = [c_wchar_p]
 AddDllDirectory(r"C:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\amd64\release\bin") # modify path there if required
 
-import pyk4a as k4a
+import pyk4a
 from pyk4a import PyK4APlayback
 from pyk4a import ImageFormat
+from pyk4a import Config, PyK4A
 import json
 
 from helpers import colorize, convert_to_bgra_if_required
@@ -141,7 +144,7 @@ def createXYLUT(playback, textureDict, cameraConfig):
     for x in range(cameraConfig['depthHeight']):
         for y in range(cameraConfig['depthWidth']):
             point = float(x), float(y)
-            converted = playback.calibration.convert_2d_to_3d(point, 1.0, k4a.CalibrationType.DEPTH, k4a.CalibrationType.DEPTH)
+            converted = playback.calibration.convert_2d_to_3d(point, 1.0, pyk4a.CalibrationType.DEPTH, pyk4a.CalibrationType.DEPTH)
             if np.isnan(converted).any():
                 xyTable[x, y] = -1, -1  
             else:
@@ -182,7 +185,7 @@ def alignDepthColor(shaderDict, textureDict, colorWidth, colorHeight, depthWidth
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def depthToVertex(shaderDict, textureDict, cameraConfig):
+def depthToVertex(shaderDict, textureDict, cameraConfig, fusionConfig):
 
     glUseProgram(shaderDict['depthToVertexShader'])
 
@@ -190,10 +193,11 @@ def depthToVertex(shaderDict, textureDict, cameraConfig):
     glBindImageTexture(1, textureDict['xyLUT'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F) 
     glBindImageTexture(2, textureDict['refVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
-    glUniform1f(glGetUniformLocation(shaderDict['depthToVertexShader'], "minDepth"), 0.001)
-    glUniform1f(glGetUniformLocation(shaderDict['depthToVertexShader'], "maxDepth"), 10.0)
-    glUniform2f(glGetUniformLocation(shaderDict['depthToVertexShader'], "bottomLeft"), 0, 0)
-    glUniform2f(glGetUniformLocation(shaderDict['depthToVertexShader'], "topRight"), 640, 576)
+    glUniform1f(glGetUniformLocation(shaderDict['depthToVertexShader'], "minDepth"), fusionConfig['nearPlane'])
+    glUniform1f(glGetUniformLocation(shaderDict['depthToVertexShader'], "maxDepth"), fusionConfig['farPlane'])
+    glUniform2f(glGetUniformLocation(shaderDict['depthToVertexShader'], "bottomLeft"), 0.0, 0.0)
+    glUniform2f(glGetUniformLocation(shaderDict['depthToVertexShader'], "topRight"), 640.0, 576.0)
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['depthToVertexShader'], "invK"), 1, False, glm.value_ptr(cameraConfig['invK']))
 
     compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
     compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
@@ -243,11 +247,11 @@ def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, cu
 
     glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), level)
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "K"), 1, False, cameraConfig['K'])
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invK"), 1, False, linalg.inv(cameraConfig['K']))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "K"), 1, False, glm.value_ptr(cameraConfig['K']))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invK"), 1, False, glm.value_ptr(cameraConfig['invK']))
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "T"), 1, False, currPose)
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invT"), 1, False, linalg.inv(currPose))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "T"), 1, False, glm.value_ptr(currPose))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invT"), 1, False, glm.value_ptr(glm.inverse(currPose)))
 
     compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
     compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
@@ -315,17 +319,23 @@ def p2pGetReduction(bufferDict):
     return matA, vecb, AE, icpCount
 
 
-def raycastVolume(shaderDict, textureDict, fusionConfig):
+def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose):
     glUseProgram(shaderDict['raycastVolumeShader'])
 
     glBindImageTexture(0, textureDict['volume'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG16F) 
-    glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
-    glBindImageTexture(1, textureDict['refNormal'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(1, textureDict['virtualVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(2, textureDict['virtualNormal'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
     glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "nearPlane"), fusionConfig['nearPlane'])
     glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "farPlane"), fusionConfig['farPlane'])
-    glUniform3f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volDim"), fusionConfig['volDim'][0], fusionConfig['volDim'][1], fusionConfig['volDim'][2])
-    glUniform3f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volSize"), fusionConfig['volSize'][0], fusionConfig['volSize'][1], fusionConfig['volSize'][2])
+    
+    glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volDim"), fusionConfig['volDim'][0])
+    glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volSize"), fusionConfig['volSize'][0])
+
+    view = currPose * cameraConfig['invK']
+    #print(view)
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['raycastVolumeShader'], "view"), 1, False, glm.value_ptr(view))
 
     step = np.max(fusionConfig['volDim']) / np.max(fusionConfig['volSize'])
     largeStep = 0.375 # dont know why
@@ -334,8 +344,8 @@ def raycastVolume(shaderDict, textureDict, fusionConfig):
     glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "step"), step)
     glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "largeStep"), largeStep)
 
-    compWidth = int((fusionConfig['volSize'][0]/32.0)+0.5) 
-    compHeight = int((fusionConfig['volSize'][1]/32.0)+0.5)
+    compWidth = int((cameraConfig['depthWidth']/32.0)+0.5) 
+    compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
@@ -347,11 +357,13 @@ def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPos
     glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
     glBindImageTexture(2, textureDict['tracking'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
 
-    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "integrateFlag"), integrateFlag)
-    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "resetFlag"), resetFlag)
+    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "integrateFlag"), 1)
+    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "resetFlag"), 0)
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "invT"), 1, False, linalg.inv(currPose))
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "K"), 1, False, cameraConfig['K'])
+    invT = glm.inverse(currPose)
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "invT"), 1, False, glm.value_ptr(invT))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "K"), 1, False, glm.value_ptr(cameraConfig['K']))
 
     glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "p2p"), 1)
     glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "p2v"), 0)
@@ -360,15 +372,15 @@ def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPos
     glUniform1f(glGetUniformLocation(shaderDict['integrateVolumeShader'], "volSize"), fusionConfig['volSize'][0])
     glUniform1f(glGetUniformLocation(shaderDict['integrateVolumeShader'], "maxWeight"), fusionConfig['maxWeight'])
 
-    compWidth = int((fusionConfig['volSize'][0]/32.0)+0.5) 
-    compHeight = int((fusionConfig['volSize'][1]/32.0)+0.5)
+    compWidth = int((fusionConfig['volSize'][0]/32.0)) 
+    compHeight = int((fusionConfig['volSize'][1]/32.0))
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
     #pose = np.array((4, 4), dtype = 'float')
-    raycastVolume(shaderDict, textureDict, fusionConfig)
+    raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
 
     for level in range(np.size(fusionConfig['iters']), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
@@ -398,7 +410,8 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
             delta[3, 1] = result[1]
             delta[3, 2] = result[2]
 
-            currPose = delta * currPose
+            d = glm.mat4(delta)
+            currPose = d * currPose
 
             resNorm = linalg.norm(result)
 
@@ -407,6 +420,9 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
     if integrateFlag == True:
         integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+
+#def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+
 
 
 def render(VAO, window, shaderDict, textureDict):
@@ -436,7 +452,7 @@ def render(VAO, window, shaderDict, textureDict):
     xpos = w / 3.0
     glViewport(int(xpos), int(ypos), int(xwidth),h)
     glActiveTexture(GL_TEXTURE1)
-    glBindTexture(GL_TEXTURE_2D, textureDict['refNormal'])
+    glBindTexture(GL_TEXTURE_2D, textureDict['virtualNormal'])
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "isYFlip"), 0)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderType"), 0)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderOptions"), opts)
@@ -455,6 +471,7 @@ def render(VAO, window, shaderDict, textureDict):
 
 def main():
 
+    useLiveKinect = True
     # # transform to convert the image to tensor
     # transform = transforms.Compose([
     #     transforms.ToTensor()
@@ -553,24 +570,37 @@ def main():
     reduceP2PShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(reduceP2P_shader, GL_COMPUTE_SHADER))
 
 
-    playback = PyK4APlayback("C:\data\outSess1.mkv")
-    playback.open()
+    if useLiveKinect == False:
+        k4a = PyK4APlayback("C:\data\outSess1.mkv")
+        k4a.open()
+    else: 
+        k4a = PyK4A(
+            Config(
+                color_resolution=pyk4a.ColorResolution.RES_1080P,
+                depth_mode=pyk4a.DepthMode.NFOV_UNBINNED,
+                synchronized_images_only=True,
+            )
+        )
+        k4a.start()
 
-    cal = json.loads(playback.calibration_raw)
+    cal = json.loads(k4a.calibration_raw)
     depthCal = cal["CalibrationInformation"]["Cameras"][0]["Intrinsics"]["ModelParameters"]
     colorCal = cal["CalibrationInformation"]["Cameras"][1]["Intrinsics"]["ModelParameters"]
     # https://github.com/microsoft/Azure-Kinect-Sensor-SDK/blob/61951daac782234f4f28322c0904ba1c4702d0ba/src/transformation/mode_specific_calibration.c
     # from microsfots way of doing things, you have to do the maths here, rememberedding to -0.5f from cx, cy at the end
     # this should be set from the depth mode type, as the offsets are different, see source code in link
-    K = np.eye(4, dtype='float')
-    K[0][0] = depthCal[2] * cal["CalibrationInformation"]["Cameras"][0]["SensorWidth"] # fx
-    K[1][1] = depthCal[3] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"] # fy
-    K[2][0] = (depthCal[0] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"]) - 192.0 - 0.5 # cx
-    K[2][1] = (depthCal[1] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"]) - 180.0 - 0.5 # cy
+    #K = np.eye(4, dtype='float32')
+    K = glm.mat4(1.0)
+    K[0, 0] = depthCal[2] * cal["CalibrationInformation"]["Cameras"][0]["SensorWidth"] # fx
+    K[1, 1] = depthCal[3] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"] # fy
+    K[2, 0] = (depthCal[0] * cal["CalibrationInformation"]["Cameras"][0]["SensorWidth"]) - 192.0 - 0.5 # cx
+    K[2, 1] = (depthCal[1] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"]) - 180.0 - 0.5 # cy
+
+    invK = glm.inverse(K)
 
     #playback.configuration["color_format"] == ImageFormat.COLOR_MJPG
-    if playback.configuration["depth_mode"] == k4a.DepthMode.NFOV_UNBINNED:
-        print("hello")
+    #if k4a.configuration["depth_mode"] == pyk4a.DepthMode.NFOV_UNBINNED:
+    #    print("hello")
 
     shaderDict = {
         'renderShader' : renderShader,
@@ -609,14 +639,14 @@ def main():
     }
 
     fusionConfig = {
-        'volSize' : (128, 128, 128),
-        'volDim' : (5.0, 5.0, 5.0),
+        'volSize' : (256, 256, 256),
+        'volDim' : (1.0, 1.0, 1.0),
         'iters' : (2, 2, 2),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
         'nearPlane' : 0.1,
-        'farPlane' : 5.0
+        'farPlane' : 1.0
     }
 
     cameraConfig = {
@@ -624,7 +654,8 @@ def main():
         'depthHeight' : 576,
         'colorWidth' : 1920,
         'colorHeight' : 1080,
-        'K' : K
+        'K' : K,
+        'invK' : invK
     }
 
     textureDict = generateTextures(textureDict, cameraConfig, fusionConfig)
@@ -634,10 +665,17 @@ def main():
     useColorMat = False 
     integrateFlag = True
     resetFlag = True
-    currPose = np.eye(4, dtype='float')
+    initPose = glm.mat4()
+    initPose[3,0] = fusionConfig['volDim'][0] / 2.0
+    initPose[3,1] = fusionConfig['volDim'][1] / 2.0
+    initPose[3,2] = 0
+
+
+    currPose = initPose
+
 
     # LUTs
-    createXYLUT(playback, textureDict, cameraConfig)
+    createXYLUT(k4a, textureDict, cameraConfig)
 
     while not glfw.window_should_close(window):
 
@@ -646,15 +684,19 @@ def main():
         imgui.new_frame()
 
         try:
-            capture = playback.get_next_capture()
+            if useLiveKinect == False:
+                capture = k4a.get_next_capture()
+            else:    
+                capture = k4a.get_capture()
             if capture.color is not None:
-                if playback.configuration["color_format"] == ImageFormat.COLOR_MJPG:
-                    colorMat = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
-                    useColorMat = True
+                if useLiveKinect == False:
+                    if k4a.configuration["color_format"] == ImageFormat.COLOR_MJPG:
+                        colorMat = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
+                        useColorMat = True
 
                 glActiveTexture(GL_TEXTURE0)
                 glBindTexture(GL_TEXTURE_2D, textureDict['lastColor'])
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), GL_RGB, GL_UNSIGNED_BYTE, (capture.color, colorMat)[useColorMat] )
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), (GL_RGB, GL_RGBA)[useLiveKinect], GL_UNSIGNED_BYTE, (capture.color, colorMat)[useColorMat] )
 
             if capture.depth is not None:
                 glActiveTexture(GL_TEXTURE1)
@@ -685,13 +727,14 @@ def main():
 
 
         bilateralFilter(shaderDict, textureDict, cameraConfig)
-        depthToVertex(shaderDict, textureDict, cameraConfig)
+        depthToVertex(shaderDict, textureDict, cameraConfig, fusionConfig)
         #alignDepthColor(alignDepthColorShader, textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
         vertexToNormal(shaderDict, textureDict, cameraConfig)
 
         mipmapTextures(textureDict)
 
         runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
         if resetFlag == True:
             resetFlag = False
@@ -707,6 +750,9 @@ def main():
         glfw.swap_buffers(window)        
 
     glfw.terminate()
+    if useLiveKinect == True:
+        k4a.stop()
+
     
 
 

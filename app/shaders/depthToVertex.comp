@@ -4,7 +4,7 @@ layout (binding = 0, r32f) readonly uniform image2D dataIn;			// Depth map
 layout (binding = 1, rg32f) readonly uniform image2D xyTable;
 layout (binding = 2, rgba32f) writeonly uniform image2D dataOut;	// Vertex map
 
-//uniform mat4 invK;		// Inverse of the intrinsic matrix
+uniform mat4 invK;		// Inverse of the intrinsic matrix
 uniform float minDepth;
 uniform float maxDepth;
 
@@ -25,12 +25,13 @@ void main(void)
 		&& u.x > bottomLeft.x && u.y > bottomLeft.y
 		&& u.x < topRight.x && u.y < topRight.y)
 	{
-		//vec3 v = z * mat3(invK) * vec3(u, 1.0);
+		vec3 v = z * mat3(invK) * vec3(u, 1.0);
 
-		float x = xy.x * z;
-		float y = xy.y * z;
+		//float x = xy.x * z;
+		//float y = xy.y * z;
+		imageStore(dataOut, u, vec4(v.x, v.y, z, 1.0));
 
-		imageStore(dataOut, u, vec4(x, y, z, 1.0));
+		//imageStore(dataOut, u, vec4(x, y, z, 1.0));
 	}
 	else
 	{

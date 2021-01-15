@@ -2,8 +2,7 @@
 
 layout(local_size_x = 32, local_size_y = 32) in;
 
-layout(binding = 0, rg16f) uniform image3D volumeData;
-
+layout (binding = 0, rg16f) uniform image3D volumeData;
 layout (binding = 1, rgba32f) readonly uniform image2D currVertexMap;
 layout (binding = 2, rgba8) readonly uniform image2D currTrackMap;
 
@@ -12,6 +11,7 @@ uniform int resetFlag;
 
 uniform mat4 invT;
 uniform mat4 K;
+uniform vec4 cam;
 
 uniform int p2p;
 uniform int p2v;
@@ -28,7 +28,14 @@ vec3 projectPointImage(vec3 p, float fx, float fy, float cx, float cy)
                 p.z);
 }
 
-vec3 getVolumePosition(uvec3 p)
+vec3 projectPointImageTest(vec3 p)
+{
+    return vec3(((504.3 * p.x) / p.z) + 320,
+                ((504.25 * p.y) / p.z) + 317,
+                p.z);
+}
+
+vec3 getVolumePosition(vec3 p)
 {
     return vec3((p.x + 0.5f) * volDim / volSize, (p.y + 0.5f) * volDim / volSize, (p.z + 0.5f) * volDim / volSize);
 }
@@ -44,7 +51,7 @@ bool inFrustrum(in vec4 pClip)
            abs(pClip.y) < pClip.w; 
 }
 
-void integrateExperimental()
+void integrate()
 {
 	int numberOfCameras = 1;
 
@@ -61,10 +68,11 @@ void integrateExperimental()
         for (int cameraDevice = 0; cameraDevice < numberOfCameras; cameraDevice++)
         {
             // get world position of centre of voxel 
-            vec3 worldPos = vec3(invT * vec4(getVolumePosition(pix), 1.0f)).xyz;
+            vec3 worldPos = vec3(invT * vec4(getVolumePosition(vec3(pix)), 1.0f)).xyz;
 
-			vec3 pixel = projectPointImage(worldPos, K[0][0], K[1][1], K[2][0], K[2][1]);
-
+			//vec3 pixel = projectPointImage(worldPos, K[0][0], K[1][1], K[2][0], K[2][1]);
+			//vec3 pixel = projectPointImage(worldPos, 504.03, 504.251, 320.07, 317.02);
+            vec3 pixel = projectPointImageTest(worldPos);
 
 			ivec2 px = ivec2(pixel.x + 0.5f, pixel.y + 0.5f); // for rounding
 
@@ -117,7 +125,7 @@ void integrateExperimental()
 		//imageStore(volumeData, ivec3(pix), vec4(finalDiff, 0, 0, 1));
 
         float ctfo = 0.1f;
-       /* if (track[bestTrack] == vec4(0.5f, 0.5f, 0.5f, 1.0 ))
+        if (track[bestTrack] == vec4(0.5f, 0.5f, 0.5f, 1.0 ))
         {
             ctfo = 0.1f;
         }
@@ -128,11 +136,10 @@ void integrateExperimental()
         else if (track[bestTrack] == vec4(1.0f, 0.0f, 0.0f, 1.0))
         {
             ctfo = 0.001f;
-        }*/
+        }
 
 		float dMin = -volDim / 20.0f;
 		float dMax = volDim / 10.0f;
-        //imageStore(volumeData, ivec3(pix), vec4(finalDiff, 0.1, 0, 0));
 
         // if diff within TSDF range, write to volume
         if (finalDiff < dMax && finalDiff > dMin)
@@ -162,11 +169,11 @@ void integrateExperimental()
             }
             imageStore(volumeData, ivec3(pix), data);
         }
-        else
-        {
+        //else
+        //{
             //pix.z += 50; // need to be clever here, but this could work nicely woudl like to jump to just before the 
             //imageStore(volumeData, ivec3(pix), vec4(0.0f));
-        }
+        //}
 
 		
     }
@@ -204,7 +211,7 @@ void main()
 {
 	if (integrateFlag == 1)
 	{
-	    integrateExperimental();
+	    integrate();
 	}
 	else if (resetFlag == 1)
 	{
