@@ -51,16 +51,15 @@ def createBuffer(buffer, bufferType, size, usage):
 
     return bufName
 
-def generateBuffers(bufferDict, depthWidth, depthHeight):
+def generateBuffers(bufferDict, cameraConfig):
     
-    p2pRedBufSize = depthWidth * depthHeight * 8 * 4 # 8 float32 per depth pixel for reduction struct
-    p2pRedOutBufSize = depthWidth * depthHeight * 8 * 4 # 8 float32 per depth pixel for reduction struct
+    p2pRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 8 * 4 # 8 float32 per depth pixel for reduction struct
+    p2pRedOutBufSize = 32 * 8 * 4
 
     bufferDict['p2pReduction'] = createBuffer(bufferDict['p2pReduction'], GL_SHADER_STORAGE_BUFFER, p2pRedBufSize, GL_DYNAMIC_DRAW)
     bufferDict['p2pRedOut'] = createBuffer(bufferDict['p2pRedOut'], GL_SHADER_STORAGE_BUFFER, p2pRedOutBufSize, GL_DYNAMIC_DRAW)
 
     return bufferDict
-
 
 def createTexture(texture, target, internalFormat, levels, width, height, depth, minFilter, magFilter):
 
@@ -91,36 +90,36 @@ def createTexture(texture, target, internalFormat, levels, width, height, depth,
 
     return texName
 
-def generateTextures(textureDict, colwidth, colheight, depwidth, depheight):
+def generateTextures(textureDict, cameraConfig, fusionConfig):
 
-
+    numLevels = np.size(fusionConfig['iters'])
     #lastColor
-    textureDict['rawColor'] = createTexture(textureDict['rawColor'], GL_TEXTURE_2D, GL_RGBA8, 1, int(colwidth), int(colheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['rawColor'] = createTexture(textureDict['rawColor'], GL_TEXTURE_2D, GL_RGBA8, 1, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
-    textureDict['lastColor'] = createTexture(textureDict['lastColor'], GL_TEXTURE_2D, GL_RGBA8, 3, int(colwidth), int(colheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['nextColor'] = createTexture(textureDict['nextColor'], GL_TEXTURE_2D, GL_RGBA8, 3, int(colwidth), int(colheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['lastColor'] = createTexture(textureDict['lastColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['nextColor'] = createTexture(textureDict['nextColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     
-    textureDict['rawDepth'] = createTexture(textureDict['rawDepth'], GL_TEXTURE_2D, GL_R16, 1, int(depwidth), int(depheight), 1, GL_NEAREST, GL_NEAREST)
+    textureDict['rawDepth'] = createTexture(textureDict['rawDepth'], GL_TEXTURE_2D, GL_R16, 1, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST, GL_NEAREST)
     
-    textureDict['filteredDepth'] = createTexture(textureDict['filteredDepth'], GL_TEXTURE_2D, GL_R32F, 1, int(depwidth), int(depheight), 1, GL_NEAREST, GL_NEAREST)
+    textureDict['filteredDepth'] = createTexture(textureDict['filteredDepth'], GL_TEXTURE_2D, GL_R32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
     
-    textureDict['xyLUT'] = createTexture(textureDict['xyLUT'], GL_TEXTURE_2D, GL_RG32F, 1, int(depwidth), int(depheight), 1, GL_NEAREST, GL_NEAREST)
+    textureDict['xyLUT'] = createTexture(textureDict['xyLUT'], GL_TEXTURE_2D, GL_RG32F, 1, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST, GL_NEAREST)
 
-    textureDict['lastDepth'] = createTexture(textureDict['lastDepth'], GL_TEXTURE_2D, GL_R32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['nextDepth'] = createTexture(textureDict['nextDepth'], GL_TEXTURE_2D, GL_R32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['lastDepth'] = createTexture(textureDict['lastDepth'], GL_TEXTURE_2D, GL_R32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
+    textureDict['nextDepth'] = createTexture(textureDict['nextDepth'], GL_TEXTURE_2D, GL_R32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
     
-    textureDict['mappingC2D'] = createTexture(textureDict['mappingC2D'], GL_TEXTURE_2D, GL_RG16, 3, int(colwidth), int(colheight), 1, GL_NEAREST, GL_NEAREST)
-    textureDict['mappingD2C'] = createTexture(textureDict['mappingD2C'], GL_TEXTURE_2D, GL_RG16, 3, int(colwidth), int(colheight), 1, GL_NEAREST, GL_NEAREST)
+    textureDict['mappingC2D'] = createTexture(textureDict['mappingC2D'], GL_TEXTURE_2D, GL_RG16, numLevels, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_NEAREST, GL_NEAREST)
+    textureDict['mappingD2C'] = createTexture(textureDict['mappingD2C'], GL_TEXTURE_2D, GL_RG16, numLevels, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_NEAREST, GL_NEAREST)
 
-    textureDict['refVertex'] = createTexture(textureDict['refVertex'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['virtualVertex'] = createTexture(textureDict['virtualVertex'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['refVertex'] = createTexture(textureDict['refVertex'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
+    textureDict['virtualVertex'] = createTexture(textureDict['virtualVertex'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
     
-    textureDict['refNormal'] = createTexture(textureDict['refNormal'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['virtualNormal'] = createTexture(textureDict['virtualNormal'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['refNormal'] = createTexture(textureDict['refNormal'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
+    textureDict['virtualNormal'] = createTexture(textureDict['virtualNormal'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
 
-    textureDict['volume'] = createTexture(textureDict['volume'], GL_TEXTURE_3D, GL_RG16F, 1, 128, 128, 128, GL_NEAREST, GL_NEAREST)
+    textureDict['volume'] = createTexture(textureDict['volume'], GL_TEXTURE_3D, GL_RG16F, 1, fusionConfig['volSize'][0], fusionConfig['volSize'][1], fusionConfig['volSize'][2], GL_NEAREST, GL_NEAREST)
 
-    textureList['tracking'] = createTexture(textureList['tracking'], GL_TEXTURE_2D, GL_RGBA32F, 3, int(depwidth), int(depheight), 1, GL_NEAREST, GL_NEAREST)
+    textureDict['tracking'] = createTexture(textureDict['tracking'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
     #nextFlowMap
     #textureList[5] = createTexture(textureList[5], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     #sparseFlowMap
@@ -135,12 +134,12 @@ def generateTextures(textureDict, colwidth, colheight, depwidth, depheight):
 
     return textureDict
 
-def createXYLUT(playback, textureDict, depthWidth, depthHeight):
+def createXYLUT(playback, textureDict, cameraConfig):
 
-    xyTable = np.zeros((depthHeight, depthWidth, 2), dtype = "float")
+    xyTable = np.zeros((cameraConfig['depthHeight'], cameraConfig['depthWidth'], 2), dtype = "float")
 
-    for x in range(depthHeight):
-        for y in range(depthWidth):
+    for x in range(cameraConfig['depthHeight']):
+        for y in range(cameraConfig['depthWidth']):
             point = float(x), float(y)
             converted = playback.calibration.convert_2d_to_3d(point, 1.0, k4a.CalibrationType.DEPTH, k4a.CalibrationType.DEPTH)
             if np.isnan(converted).any():
@@ -150,10 +149,9 @@ def createXYLUT(playback, textureDict, depthWidth, depthHeight):
     
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, textureDict['xyLUT'])
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(depthWidth), int(depthHeight), GL_RG, GL_FLOAT, xyTable)
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), GL_RG, GL_FLOAT, xyTable)
 
-
-def bilateralFilter(shaderDict, textureDict, depthWidth, depthHeight):
+def bilateralFilter(shaderDict, textureDict, cameraConfig):
     glUseProgram(shaderDict['bilateralFilterShader'])
     # set logic for using filtered or unfiltered TODO
 
@@ -165,12 +163,11 @@ def bilateralFilter(shaderDict, textureDict, depthWidth, depthHeight):
     glUniform1f(glGetUniformLocation(shaderDict['bilateralFilterShader'], "sigma"), 10.0)
     glUniform1f(glGetUniformLocation(shaderDict['bilateralFilterShader'], "bSigma"), 0.05)
 
-    compWidth = int((depthWidth/32.0)+0.5)
-    compHeight = int((depthHeight/32.0)+0.5)
+    compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
+    compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)    
-
 
 def alignDepthColor(shaderDict, textureDict, colorWidth, colorHeight, depthWidth, depthHeight):
     glUseProgram(shaderDict['alignDepthColorShader'])
@@ -185,7 +182,7 @@ def alignDepthColor(shaderDict, textureDict, colorWidth, colorHeight, depthWidth
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def depthToVertex(shaderDict, textureDict, width, height):
+def depthToVertex(shaderDict, textureDict, cameraConfig):
 
     glUseProgram(shaderDict['depthToVertexShader'])
 
@@ -198,26 +195,40 @@ def depthToVertex(shaderDict, textureDict, width, height):
     glUniform2f(glGetUniformLocation(shaderDict['depthToVertexShader'], "bottomLeft"), 0, 0)
     glUniform2f(glGetUniformLocation(shaderDict['depthToVertexShader'], "topRight"), 640, 576)
 
-    compWidth = int((width/32.0)+0.5)
-    compHeight = int((height/32.0)+0.5)
+    compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
+    compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight):
+def vertexToNormal(shaderDict, textureDict, cameraConfig):
 
     glUseProgram(shaderDict['vertexToNormalShader'])
 
     glBindImageTexture(0, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
     glBindImageTexture(1, textureDict['refNormal'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
 
-    compWidth = int((depthWidth/32.0)+0.5)
-    compHeight = int((depthHeight/32.0)+0.5)
+    compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
+    compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def p2pTrack(shaderDict, textureDict, bufferDict, currPose, level):
+def mipmapTextures(textureDict):
+
+    glBindTexture(GL_TEXTURE_2D, textureDict['filteredDepth'])
+    glGenerateMipmap(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, 0)
+
+    glBindTexture(GL_TEXTURE_2D, textureDict['refVertex'])
+    glGenerateMipmap(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, 0)
+
+    glBindTexture(GL_TEXTURE_2D, textureDict['refNormal'])
+    glGenerateMipmap(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, 0)    
+
+def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, level):
     glUseProgram(shaderDict['trackP2PShader'])
 
     glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
@@ -226,27 +237,82 @@ def p2pTrack(shaderDict, textureDict, bufferDict, currPose, level):
     glBindImageTexture(2, textureDict['virtualVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
     glBindImageTexture(3, textureDict['virtualNormal'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
 
-    glBindImageTexture(4, textureDict['tracking'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(4, textureDict['tracking'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8) 
 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pReduction'])
 
-    glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), fusionConfig['level'])
+    glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), level)
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "K"), 1, False, K)
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invK"), 1, False, np.invert(K))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "K"), 1, False, cameraConfig['K'])
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invK"), 1, False, linalg.inv(cameraConfig['K']))
 
     glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "T"), 1, False, currPose)
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invT"), 1, False, np.invert(currPose))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "invT"), 1, False, linalg.inv(currPose))
 
-    compWidth = int((depthWidth/32.0)+0.5)
-    compHeight = int((depthHeight/32.0)+0.5)
+    compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
+    compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-#def p2pReduce():
+def p2pReduce(shaderDict, bufferDict, cameraConfig):
+    glUseProgram(shaderDict['reduceP2PShader'])
 
-#def p2pGetReduction():        
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pReduction'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2pRedOut'])
+
+    glUniform2i(glGetUniformLocation(shaderDict['reduceP2PShader'], "imSize"), cameraConfig['depthWidth'], cameraConfig['depthHeight'])
+
+    glDispatchCompute(8, 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+def p2pGetReduction(bufferDict):        
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2pRedOut'])
+    reductionData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32 * 8 * 4)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+
+    #   vector b
+	# 	| 1 |
+	# 	| 2 |
+	# 	| 3 |
+	# 	| 4 |
+	# 	| 5 |
+	# 	| 6 |
+
+	# 	and
+	# 	matrix a
+	# 	| 7  | 8  | 9  | 10 | 11 | 12 |
+	# 	| 8  | 13 | 14 | 15 | 16 | 17 |
+	# 	| 9  | 14 | 18 | 19 | 20 | 21 |
+	# 	| 10 | 15 | 19 | 22 | 23 | 24 |
+	# 	| 11 | 16 | 20 | 23 | 25 | 26 |
+	# 	| 12 | 17 | 21 | 24 | 26 | 27 |
+
+	# 	AE = sqrt( [0] / [28] )
+	# 	count = [28]
+
+    vecb = np.zeros((6, 1), dtype='double')
+    matA = np.zeros((6, 6), dtype='double')
+
+    for row in range(1, 7, 1):
+        for col in range(0, 31, 1):
+            reductionData[col + 0 * 32] += reductionData[col + row * 32]
+
+    for i in range(1, 6, 1):
+        vecb[i - 1] = reductionData[i]
+
+    shift = 7    
+    for i in range(0, 5, 1):
+        for j in range(i, 5, 1):
+            shift += 1 # check this offset
+            value = reductionData[shift]
+            matA[j][i] = matA[i][j] = value
+
+    AE = np.sqrt(reductionData[0] / reductionData[28])
+    icpCount = reductionData[28]
+
+    return matA, vecb, AE, icpCount
 
 
 def raycastVolume(shaderDict, textureDict, fusionConfig):
@@ -274,45 +340,73 @@ def raycastVolume(shaderDict, textureDict, fusionConfig):
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def integrateVolume(shaderDict, textureDict):
-    glUseProgram(shaderDict['integrateShader'])
+def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+    glUseProgram(shaderDict['integrateVolumeShader'])
 
-def runP2P(shaderDict, textureDict, bufferDict, fusionConfig, currPose, integrateFlag):
-    pose = np.array((4, 4), dtype = 'float')
+    glBindImageTexture(0, textureDict['volume'], 0, GL_FALSE, 0, GL_READ_WRITE, GL_RG16F) 
+    glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(2, textureDict['tracking'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
+
+    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "integrateFlag"), integrateFlag)
+    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "resetFlag"), resetFlag)
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "invT"), 1, False, linalg.inv(currPose))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "K"), 1, False, cameraConfig['K'])
+
+    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "p2p"), 1)
+    glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "p2v"), 0)
+
+    glUniform1f(glGetUniformLocation(shaderDict['integrateVolumeShader'], "volDim"), fusionConfig['volDim'][0])
+    glUniform1f(glGetUniformLocation(shaderDict['integrateVolumeShader'], "volSize"), fusionConfig['volSize'][0])
+    glUniform1f(glGetUniformLocation(shaderDict['integrateVolumeShader'], "maxWeight"), fusionConfig['maxWeight'])
+
+    compWidth = int((fusionConfig['volSize'][0]/32.0)+0.5) 
+    compHeight = int((fusionConfig['volSize'][1]/32.0)+0.5)
+
+    glDispatchCompute(compWidth, compHeight, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+    #pose = np.array((4, 4), dtype = 'float')
     raycastVolume(shaderDict, textureDict, fusionConfig)
 
     for level in range(np.size(fusionConfig['iters']), -1, -1):
-        for iter in range(fusionConfig['iters'][level]):
-            A = np.array((6, 6), dtype = 'double')
-            b = np.array((6, 1), dtype = 'double')
+        for iter in range(fusionConfig['iters'][level - 1]):
+            #A = np.array((6, 6), dtype = 'double')
+            #b = np.array((6, 1), dtype = 'double')
             
-            p2pTrack(shaderDict, textureDict, bufferDict, currPose, level)
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, level)
 
-            # p2pReduce(bufferDict)
+            p2pReduce(shaderDict, bufferDict, cameraConfig)
 
-            # A, b, AE, icpCount = p2pGetReduction(bufferDict)
+            A, b, AE, icpCount = p2pGetReduction(bufferDict)
 
-            # result = np.array((6, 1), dtype = 'double')
+            #result = np.array((6, 1), dtype = 'double')
 
-            # result = linalg.solve(A, b)
+            lu, piv = linalg.lu_factor(A)
+            result = linalg.lu_solve((lu, piv), b)
 
-            # deltaR = R.from_rotvec(result[3], result[4], result[5])
-            # delta = np.array((4, 4), dtype = 'float')
-            # delta[:3, :3] = deltaR.as_matrix()
+            #result = linalg.solve(A, b)
+            if np.isnan(result).any():
+                result = np.zeros((6, 1), dtype='double')
 
-            # delta[3, 0] = result[0]
-            # delta[3, 1] = result[1]
-            # delta[3, 2] = result[2]
+            deltaR = R.from_euler('xyz', [result[3][0], result[4][0], result[5][0]])
+            delta = np.eye(4, dtype = 'float')
+            delta[:3, :3] = deltaR.as_matrix()
 
-            # pose = delta * pose
+            delta[3, 0] = result[0]
+            delta[3, 1] = result[1]
+            delta[3, 2] = result[2]
 
-            # resNorm = linalg.norm(result)
+            currPose = delta * currPose
 
-            # if (resNorm < 1e-5 and resNorm != 0):
-            #     break
+            resNorm = linalg.norm(result)
 
-    #if integrateFlag == True:
-    #    integrateVolume(shaderDict, textureDict)
+            if (resNorm < 1e-5 and resNorm != 0):
+                break
+
+    if integrateFlag == True:
+        integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
 
 def render(VAO, window, shaderDict, textureDict):
@@ -388,14 +482,7 @@ def main():
 
     imgui.create_context()
     impl = GlfwRenderer(window)
-
-    depthWidth = 640
-    depthHeight = 576
-
-    colorWidth = 1920
-    colorHeight = 1080
-
-  
+ 
     # rendering
     glClearColor(0.2, 0.3, 0.2, 1.0)
 
@@ -456,8 +543,14 @@ def main():
     raycast_shader = (Path(__file__).parent / 'shaders/raycast.comp').read_text()
     raycastShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(raycast_shader, GL_COMPUTE_SHADER))
 
+    integrate_shader = (Path(__file__).parent / 'shaders/integrate.comp').read_text()
+    integrateShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(integrate_shader, GL_COMPUTE_SHADER))
+
     trackP2P_shader = (Path(__file__).parent / 'shaders/p2pTrack.comp').read_text()
     trackP2PShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(trackP2P_shader, GL_COMPUTE_SHADER))
+
+    reduceP2P_shader = (Path(__file__).parent / 'shaders/p2pReduce.comp').read_text()
+    reduceP2PShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(reduceP2P_shader, GL_COMPUTE_SHADER))
 
 
     playback = PyK4APlayback("C:\data\outSess1.mkv")
@@ -468,6 +561,7 @@ def main():
     colorCal = cal["CalibrationInformation"]["Cameras"][1]["Intrinsics"]["ModelParameters"]
     # https://github.com/microsoft/Azure-Kinect-Sensor-SDK/blob/61951daac782234f4f28322c0904ba1c4702d0ba/src/transformation/mode_specific_calibration.c
     # from microsfots way of doing things, you have to do the maths here, rememberedding to -0.5f from cx, cy at the end
+    # this should be set from the depth mode type, as the offsets are different, see source code in link
     K = np.eye(4, dtype='float')
     K[0][0] = depthCal[2] * cal["CalibrationInformation"]["Cameras"][0]["SensorWidth"] # fx
     K[1][1] = depthCal[3] * cal["CalibrationInformation"]["Cameras"][0]["SensorHeight"] # fy
@@ -484,7 +578,10 @@ def main():
         'alignDepthColorShader' : alignDepthColorShader,
         'depthToVertexShader' : depthToVertexShader,
         'vertexToNormalShader' : vertexToNormalShader,
-        'raycastVolumeShader' : raycastShader
+        'raycastVolumeShader' : raycastShader,
+        'integrateVolumeShader' : integrateShader,
+        'trackP2PShader' : trackP2PShader,
+        'reduceP2PShader' : reduceP2PShader
     }
 
     bufferDict = {
@@ -513,8 +610,8 @@ def main():
 
     fusionConfig = {
         'volSize' : (128, 128, 128),
-        'volDim' : (1.0, 1.0, 1.0),
-        'iters' : (2, 5, 10),
+        'volDim' : (5.0, 5.0, 5.0),
+        'iters' : (2, 2, 2),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
@@ -527,19 +624,20 @@ def main():
         'depthHeight' : 576,
         'colorWidth' : 1920,
         'colorHeight' : 1080,
-        'K' : 1
+        'K' : K
     }
 
-    textureDict = generateTextures(textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
-    bufferDict = generateBuffers(bufferDict, depthWidth, depthHeight)
+    textureDict = generateTextures(textureDict, cameraConfig, fusionConfig)
+    bufferDict = generateBuffers(bufferDict, cameraConfig)
 
-    colorMat = np.zeros((colorHeight, colorWidth, 3), dtype = "uint8")
+    colorMat = np.zeros((cameraConfig['colorHeight'], cameraConfig['colorWidth'], 3), dtype = "uint8")
     useColorMat = False 
-    integrateFlag = False
+    integrateFlag = True
+    resetFlag = True
     currPose = np.eye(4, dtype='float')
 
     # LUTs
-    createXYLUT(playback, textureDict, depthWidth, depthHeight)
+    createXYLUT(playback, textureDict, cameraConfig)
 
     while not glfw.window_should_close(window):
 
@@ -556,12 +654,12 @@ def main():
 
                 glActiveTexture(GL_TEXTURE0)
                 glBindTexture(GL_TEXTURE_2D, textureDict['lastColor'])
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(colorWidth), int(colorHeight), GL_RGB, GL_UNSIGNED_BYTE, (capture.color, colorMat)[useColorMat] )
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), GL_RGB, GL_UNSIGNED_BYTE, (capture.color, colorMat)[useColorMat] )
 
             if capture.depth is not None:
                 glActiveTexture(GL_TEXTURE1)
                 glBindTexture(GL_TEXTURE_2D, textureDict['rawDepth'])
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(depthWidth), int(depthHeight), GL_RED, GL_UNSIGNED_SHORT, capture.depth)
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), GL_RED, GL_UNSIGNED_SHORT, capture.depth)
 
         except EOFError:
             break
@@ -586,14 +684,17 @@ def main():
 
 
 
-        bilateralFilter(shaderDict, textureDict, depthWidth, depthHeight)
-        depthToVertex(shaderDict, textureDict, depthWidth, depthHeight)
+        bilateralFilter(shaderDict, textureDict, cameraConfig)
+        depthToVertex(shaderDict, textureDict, cameraConfig)
         #alignDepthColor(alignDepthColorShader, textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
-        vertexToNormal(shaderDict, textureDict, depthWidth, depthHeight)
+        vertexToNormal(shaderDict, textureDict, cameraConfig)
 
-        runP2P(shaderDict, textureDict, bufferDict, fusionConfig, currPose, integrateFlag)
+        mipmapTextures(textureDict)
 
+        runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
+        if resetFlag == True:
+            resetFlag = False
 
 
 
