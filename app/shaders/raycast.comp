@@ -7,6 +7,7 @@ layout(binding = 1, rgba32f) writeonly uniform image2D refVertex;
 layout(binding = 2, rgba32f) writeonly uniform image2D refNormal;
 
 uniform mat4 view;
+uniform vec3 initOffset;
 
 uniform float nearPlane;
 uniform float farPlane;
@@ -271,7 +272,8 @@ void main()
 
         if (hit.w > 0)
         {
-            imageStore(refVertex, ivec2(pix), vec4(hit.xyz, 1.0f));
+            vec3 adjustedHit = vec3(hit.x - initOffset.x, hit.y - initOffset.y, hit.z - initOffset.z);
+            imageStore(refVertex, ivec2(pix), vec4(adjustedHit.xyz, 1.0f));
 
             vec3 surfNorm = getGradient(hit);// volume.grad(make_float3(hit));
             if (length(surfNorm) == 0)
