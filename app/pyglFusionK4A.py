@@ -935,6 +935,8 @@ def main():
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
     teeData = np.frombuffer(tee, dtype=np.float32)
 
+    
+
     #fusionConfig['initOffset'] = (initPose[3,0], initPose[3,1], initPose[3,2])
 
 
