@@ -60,9 +60,16 @@ def generateBuffers(bufferDict, cameraConfig):
     
     p2pRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 8 * 4 # 8 float32 per depth pixel for reduction struct
     p2pRedOutBufSize = 32 * 8 * 4
+    p2vRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 9 * 4 # 9 float32 per depth pixel for reduction struct
+    p2vRedOutBufSize = 32 * 8 * 4
 
     bufferDict['p2pReduction'] = createBuffer(bufferDict['p2pReduction'], GL_SHADER_STORAGE_BUFFER, p2pRedBufSize, GL_DYNAMIC_DRAW)
     bufferDict['p2pRedOut'] = createBuffer(bufferDict['p2pRedOut'], GL_SHADER_STORAGE_BUFFER, p2pRedOutBufSize, GL_DYNAMIC_DRAW)
+    
+    bufferDict['p2vReduction'] = createBuffer(bufferDict['p2vReduction'], GL_SHADER_STORAGE_BUFFER, p2vRedBufSize, GL_DYNAMIC_DRAW)
+    bufferDict['p2vRedOut'] = createBuffer(bufferDict['p2vRedOut'], GL_SHADER_STORAGE_BUFFER, p2vRedOutBufSize, GL_DYNAMIC_DRAW)
+
+    
 
     return bufferDict
 
@@ -275,7 +282,7 @@ def p2pReduce(shaderDict, bufferDict, cameraConfig, level):
     glDispatchCompute(8, 1, 1)
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
-def p2pGetReduction(bufferDict):        
+def getReductionP2P(bufferDict):        
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2pRedOut'])
     tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32 * 8 * 4)
@@ -323,7 +330,6 @@ def p2pGetReduction(bufferDict):
     icpCount = reductionData[28]
 
     return matA, vecb, AE, icpCount
-
 
 def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose):
     glUseProgram(shaderDict['raycastVolumeShader'])
@@ -386,7 +392,7 @@ def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPos
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 def resultToMatrix(result):
-# from https://github.com/g-truc/glm/tree/master/glm/gtx/euler_angles.inl
+    # from https://github.com/g-truc/glm/tree/master/glm/gtx/euler_angles.inl
     delta = glm.mat4(1.0)
 
     c1 = math.cos(-result[3])
@@ -415,30 +421,32 @@ def resultToMatrix(result):
     
     return delta    
 
-def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
-    #pose = np.array((4, 4), dtype = 'float')
-    raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
-    oldPose = currPose
-    #print("old pose")
-    #print(currPose)
-    T = currPose#glm.mat4(1)
+def twist(xi):
 
+    M = glm.mat4(0.0,    xi[2], -xi[1], 0.0, 
+    -xi[2],  0.0,    xi[0], 0.0,
+    xi[1], -xi[0],  0.0,   0.0,
+    xi[3],  xi[4],  xi[5], 0.0)
+  
+    return M
+
+
+def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+
+    raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
+    T = currPose
 
     for level in range(np.size(fusionConfig['iters']), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
-            #A = np.array((6, 6), dtype = 'double')
-            #b = np.array((6, 1), dtype = 'double')
             
             p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, T, level)
 
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
-            A, b, AE, icpCount = p2pGetReduction(bufferDict)
+            A, b, AE, icpCount = getReductionP2P(bufferDict)
 
-            #result = np.array((6, 1), dtype = 'double')
             #sTime = time.time()
             
-
             if (icpCount > 0):
                 try:
                     result = linalg.solve(A, b)
@@ -447,16 +455,13 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
                 except:
                     result = np.zeros((6, 1), dtype='double')
                     continue
-
-                #if np.isnan(result).any():
-
-            
+           
                 delta = resultToMatrix(result)
 
-                d = glm.mat4(delta)
+                #d = glm.mat4(delta)
 
-                T = d * T
-                print(AE, icpCount)
+                T = delta * T
+                #print(AE, icpCount)
 
                 #eTime = time.time()
                 #print((eTime - sTime) * 1000)
@@ -470,7 +475,165 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     if integrateFlag == True:
         integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
-#def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+def trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, tempT, level):
+    glUseProgram(shaderDict['trackP2VShader'])
+
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_3D, textureDict['volume'])
+
+    glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(1, textureDict['refNormal'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F)
+
+    glBindImageTexture(2, textureDict['virtualNormal'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    glBindImageTexture(3, textureDict['tracking'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8) 
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2vReduction'])
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2VShader'], "T"), 1, False, glm.value_ptr(tempT))
+    glUniform3f(glGetUniformLocation(shaderDict['trackP2VShader'], "volDim"), fusionConfig['volDim'][0], fusionConfig['volDim'][1], fusionConfig['volDim'][2])
+    glUniform3f(glGetUniformLocation(shaderDict['trackP2VShader'], "volSize"), fusionConfig['volSize'][0], fusionConfig['volSize'][1], fusionConfig['volSize'][2])
+    glUniform1i(glGetUniformLocation(shaderDict['trackP2VShader'], "mip"), level)
+
+    compWidth = int((cameraConfig['depthWidth']/32.0)+0.5)
+    compHeight = int((cameraConfig['depthHeight']/32.0)+0.5)
+
+    glDispatchCompute(compWidth, compHeight, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+def reduceP2V(shaderDict, bufferDict, cameraConfig, level):
+    glUseProgram(shaderDict['reduceP2VShader'])
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2vReduction'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2vRedOut'])
+
+    glUniform2i(glGetUniformLocation(shaderDict['reduceP2VShader'], "imSize"), cameraConfig['depthWidth'] << level, cameraConfig['depthHeight'] << level)
+
+    glDispatchCompute(8, 1, 1)
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+def getReductionP2V(bufferDict):        
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2vRedOut'])
+    tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32 * 8 * 4)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    reductionData = np.frombuffer(tempData, dtype=np.float32)
+
+    #   vector b
+	# 	| 1 |
+	# 	| 2 |
+	# 	| 3 |
+	# 	| 4 |
+	# 	| 5 |
+	# 	| 6 |
+
+	# 	and
+	# 	matrix a
+	# 	| 7  | 8  | 9  | 10 | 11 | 12 |
+	# 	| 8  | 13 | 14 | 15 | 16 | 17 |
+	# 	| 9  | 14 | 18 | 19 | 20 | 21 |
+	# 	| 10 | 15 | 19 | 22 | 23 | 24 |
+	# 	| 11 | 16 | 20 | 23 | 25 | 26 |
+	# 	| 12 | 17 | 21 | 24 | 26 | 27 |
+
+	# 	AE = sqrt( [0] / [28] )
+	# 	count = [28]
+
+    vecb = np.zeros((6, 1), dtype='double')
+    matA = np.zeros((6, 6), dtype='double')
+
+    for row in range(1, 7, 1):
+        for col in range(0, 31, 1):
+            reductionData[col] += reductionData[col + (row * 32)]
+
+    for i in range(1, 7, 1):
+        vecb[i - 1] = reductionData[i]
+
+    shift = 6    
+    for i in range(0, 6, 1):
+        for j in range(i, 6, 1):
+            shift += 1 # check this offset
+            value = reductionData[shift]
+            matA[j][i] = matA[i][j] = value
+
+    AE = np.sqrt(reductionData[0] / reductionData[28])
+    icpCount = reductionData[28]
+
+    return matA, vecb, AE, icpCount
+
+def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+
+    result = np.zeros((6, 1), dtype='double')
+    resultPrev = np.zeros((6, 1), dtype='double')
+
+    T = currPose
+    prevT = T
+
+    for level in range(np.size(fusionConfig['iters']), -1, -1):
+        for iter in range(fusionConfig['iters'][level - 1]):
+
+            tempTarr = linalg.expm(np.array(twist(result)))
+            tempTmat = glm.mat4(0)
+            for i in range(4):
+                for j in range(4):
+                    tempTmat[i, j] = tempTarr[i][j]
+
+            currT = tempTmat * T
+            
+            trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currT, level)
+
+            reduceP2V(shaderDict, bufferDict, cameraConfig, level)
+
+            A, b, AE, icpCount = getReductionP2V(bufferDict)
+
+            if (icpCount > 0):
+
+                scaling = 1.0
+
+                if (np.max(A) != 0 and (1.0 / np.max(A)) > 0.0):
+                    scaling = np.max(A)
+
+
+                A *= scaling
+                b *= scaling
+
+                adjA = A + (iter * np.identity(6, dtype='double'))
+
+                try:
+                    result = result - linalg.solve(adjA, b)
+                    #lu, piv = linalg.lu_factor(A)
+                    #result = linalg.lu_solve((lu, piv), b)
+                except:
+                    result = np.zeros((6, 1), dtype='double')
+                    continue
+
+                change = result - resultPrev
+                cNorm = linalg.norm(change)
+
+                resultPrev = result
+
+                if (cNorm < 1e-4 and AE != 0):
+                    break
+
+    if (np.isnan(result).any()):
+        result = np.zeros((6, 1), dtype='double')
+
+    lnpa2 = linalg.expm(np.array(twist(result)))
+    glnpa2 = glm.mat4(0)
+    for i in range(4):
+        for j in range(4):
+            glnpa2[i, j] = lnpa2[i][j]
+
+    currPose = glnpa2 * T 
+                    
+    if integrateFlag == True:
+        integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+
+
+
+
+
+
+
 
     return currPose
 
@@ -618,6 +781,12 @@ def main():
     reduceP2P_shader = (Path(__file__).parent / 'shaders/p2pReduce.comp').read_text()
     reduceP2PShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(reduceP2P_shader, GL_COMPUTE_SHADER))
 
+    trackP2V_shader = (Path(__file__).parent / 'shaders/p2vTrack.comp').read_text()
+    trackP2VShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(trackP2V_shader, GL_COMPUTE_SHADER))
+
+    reduceP2V_shader = (Path(__file__).parent / 'shaders/p2vReduce.comp').read_text()
+    reduceP2VShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(reduceP2V_shader, GL_COMPUTE_SHADER))
+
 
     if useLiveKinect == False:
         k4a = PyK4APlayback("C:\data\outSess1.mkv")
@@ -660,12 +829,16 @@ def main():
         'raycastVolumeShader' : raycastShader,
         'integrateVolumeShader' : integrateShader,
         'trackP2PShader' : trackP2PShader,
-        'reduceP2PShader' : reduceP2PShader
+        'reduceP2PShader' : reduceP2PShader,
+        'trackP2VShader' : trackP2VShader,
+        'reduceP2VShader' : reduceP2VShader
     }
 
     bufferDict = {
         'p2pReduction' : -1,
-        'p2pRedOut' : -1
+        'p2pRedOut' : -1,
+        'p2vReduction' : -1,
+        'p2vRedOut' : -1
     }
 
     textureDict = {
@@ -689,14 +862,14 @@ def main():
 
     fusionConfig = {
         'volSize' : (256, 256, 256),
-        'volDim' : (1.0, 1.0, 1.0),
+        'volDim' : (4.0, 4.0, 4.0),
         'iters' : (2, 2, 2),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
         'nearPlane' : 0.1,
-        'farPlane' : 1.0
+        'farPlane' : 4.0
     }
 
     cameraConfig = {
@@ -785,8 +958,8 @@ def main():
 
         mipmapTextures(textureDict)
 
-        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        #runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
         if resetFlag == True:
             resetFlag = False
