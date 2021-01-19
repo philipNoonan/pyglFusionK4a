@@ -42,6 +42,8 @@ from torchvision.transforms import transforms as transforms
 
 import time
 
+
+
 def createBuffer(buffer, bufferType, size, usage):
     if buffer == -1:
         bufName = glGenBuffers(1)
@@ -69,7 +71,7 @@ def generateBuffers(bufferDict, cameraConfig):
     bufferDict['p2vReduction'] = createBuffer(bufferDict['p2vReduction'], GL_SHADER_STORAGE_BUFFER, p2vRedBufSize, GL_DYNAMIC_DRAW)
     bufferDict['p2vRedOut'] = createBuffer(bufferDict['p2vRedOut'], GL_SHADER_STORAGE_BUFFER, p2vRedOutBufSize, GL_DYNAMIC_DRAW)
 
-    
+    bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, GL_DYNAMIC_DRAW)
 
     return bufferDict
 
@@ -430,7 +432,6 @@ def twist(xi):
   
     return M
 
-
 def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
 
     raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
@@ -683,18 +684,19 @@ def render(VAO, window, shaderDict, textureDict):
 
 def main():
 
-    useLiveKinect = True   
-    # # transform to convert the image to tensor
-    # transform = transforms.Compose([
-    #     transforms.ToTensor()
-    # ])
-    # # initialize the model
-    # model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
-    #                                                             num_keypoints=17)
-    # # set the computation device
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # # load the modle on to the computation device and set to eval mode
-    # model.to(device).eval()
+    useLiveKinect = False   
+
+    # transform to convert the image to tensor
+    transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+    # initialize the model
+    model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
+                                                                num_keypoints=17)
+    # set the computation device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # load the modle on to the computation device and set to eval mode
+    model.to(device).eval()
 
     # initialize glfw
     if not glfw.init():
@@ -838,7 +840,8 @@ def main():
         'p2pReduction' : -1,
         'p2pRedOut' : -1,
         'p2vReduction' : -1,
-        'p2vRedOut' : -1
+        'p2vRedOut' : -1,
+        'test' : -1
     }
 
     textureDict = {
@@ -895,6 +898,42 @@ def main():
 
 
     currPose = initPose
+
+
+    #setup pycuda gl interop needs to be after openGL is init
+    import pycuda.gl.autoinit
+    import pycuda.gl
+    cuda_gl = pycuda.gl
+    cuda_driver = pycuda.driver
+    from pycuda.compiler import SourceModule
+    import pycuda 
+    
+    pycuda_source_ssbo = cuda_gl.RegisteredBuffer(int(bufferDict['test']), cuda_gl.graphics_map_flags.NONE)
+
+    aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
+    bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
+
+    sm = SourceModule("""
+        __global__ void simpleCopy(float *inputArray, float *outputArray) {
+                unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
+
+                outputArray[x] = inputArray[x];
+        }    
+    """)
+
+    cuda_function = sm.get_function("simpleCopy")
+
+    mappingObj = pycuda_source_ssbo.map()
+    data, size = mappingObj.device_ptr_and_size()
+
+    cuda_function(np.intp(aa.data_ptr()), np.intp(data), block=(8, 1, 1))
+
+    mappingObj.unmap()
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['test'])
+    tee = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    teeData = np.frombuffer(tee, dtype=np.float32)
 
     #fusionConfig['initOffset'] = (initPose[3,0], initPose[3,1], initPose[3,2])
 
