@@ -3,6 +3,8 @@ from OpenGL.GL import *
 import OpenGL.GL.shaders
 import glm
 
+import math
+
 import numpy as np
 from scipy import linalg
 from scipy.spatial.transform import Rotation as R
@@ -303,8 +305,8 @@ def p2pGetReduction(bufferDict):
     vecb = np.zeros((6, 1), dtype='double')
     matA = np.zeros((6, 6), dtype='double')
 
-    for row in range(1, 8, 1):
-        for col in range(0, 32, 1):
+    for row in range(1, 7, 1):
+        for col in range(0, 31, 1):
             reductionData[col] += reductionData[col + (row * 32)]
 
     for i in range(1, 7, 1):
@@ -383,12 +385,43 @@ def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPos
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
+def resultToMatrix(result):
+# from https://github.com/g-truc/glm/tree/master/glm/gtx/euler_angles.inl
+    delta = glm.mat4(1.0)
+
+    c1 = math.cos(-result[3])
+    c2 = math.cos(-result[4])
+    c3 = math.cos(-result[5])
+    s1 = math.sin(-result[3])
+    s2 = math.sin(-result[4])
+    s3 = math.sin(-result[5])
+        
+    delta[0, 0] = c2 * c3
+    delta[0, 1] =-c1 * s3 + s1 * s2 * c3
+    delta[0, 2] = s1 * s3 + c1 * s2 * c3
+    #delta[0, 3] = 0
+    delta[1, 0] = c2 * s3
+    delta[1, 1] = c1 * c3 + s1 * s2 * s3
+    delta[1, 2] =-s1 * c3 + c1 * s2 * s3
+    #delta[1, 3] = 0
+    delta[2, 0] =-s2
+    delta[2, 1] = s1 * c2
+    delta[2, 2] = c1 * c2
+    #delta[2, 3] = 0
+    delta[3, 0] = result[0]
+    delta[3, 1] = result[1]
+    delta[3, 2] = result[2]
+    #delta[3, 3] = 1
+    
+    return delta    
+
 def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
     #pose = np.array((4, 4), dtype = 'float')
     raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
     oldPose = currPose
-    print("old pose")
-    print(currPose)
+    #print("old pose")
+    #print(currPose)
+    T = currPose#glm.mat4(1)
 
 
     for level in range(np.size(fusionConfig['iters']), -1, -1):
@@ -396,7 +429,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
             #A = np.array((6, 6), dtype = 'double')
             #b = np.array((6, 1), dtype = 'double')
             
-            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, level)
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, T, level)
 
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
@@ -404,12 +437,13 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
             #result = np.array((6, 1), dtype = 'double')
             #sTime = time.time()
-            #lu, piv = linalg.lu_factor(A)
-            #result = linalg.lu_solve((lu, piv), b)
+            
 
             if (icpCount > 0):
                 try:
                     result = linalg.solve(A, b)
+                    #lu, piv = linalg.lu_factor(A)
+                    #result = linalg.lu_solve((lu, piv), b)
                 except:
                     result = np.zeros((6, 1), dtype='double')
                     continue
@@ -417,18 +451,12 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
                 #if np.isnan(result).any():
 
             
-                deltaR = R.from_euler('xyz', [result[3][0], result[4][0], result[5][0]])
-                delta = np.eye(4, dtype = 'float')
-                delta[:3, :3] = deltaR.as_matrix()
-                glm.transpose(delta)
-                delta[3, 0] = result[0]
-                delta[3, 1] = result[1]
-                delta[3, 2] = result[2]
+                delta = resultToMatrix(result)
 
                 d = glm.mat4(delta)
 
-                currPose = d * currPose
-                print(d)
+                T = d * T
+                print(AE, icpCount)
 
                 #eTime = time.time()
                 #print((eTime - sTime) * 1000)
@@ -438,7 +466,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
                 if (resNorm < 1e-5 and resNorm != 0):
                     break
             
-
+    currPose = T
     if integrateFlag == True:
         integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
@@ -492,7 +520,7 @@ def render(VAO, window, shaderDict, textureDict):
 
 def main():
 
-    useLiveKinect = False   
+    useLiveKinect = True   
     # # transform to convert the image to tensor
     # transform = transforms.Compose([
     #     transforms.ToTensor()
@@ -661,14 +689,14 @@ def main():
 
     fusionConfig = {
         'volSize' : (256, 256, 256),
-        'volDim' : (4.0, 4.0, 4.0),
+        'volDim' : (1.0, 1.0, 1.0),
         'iters' : (2, 2, 2),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
         'nearPlane' : 0.1,
-        'farPlane' : 4.0
+        'farPlane' : 1.0
     }
 
     cameraConfig = {
@@ -699,7 +727,7 @@ def main():
 
 
     # LUTs
-    createXYLUT(k4a, textureDict, cameraConfig)
+    #createXYLUT(k4a, textureDict, cameraConfig) <-- bug in this
 
     while not glfw.window_should_close(window):
 

@@ -55,7 +55,7 @@ void main()
 
             if (normals.x == 2)
             {
-                trackOutput[offset].result = -1; // does this matter since we are in a low mipmap not full size???
+                trackOutput[offset].result = -4; // does this matter since we are in a low mipmap not full size???
                 imageStore(trackImage, ivec2(pix), vec4(0, 0, 0, 0));
             }
             else
@@ -75,7 +75,7 @@ void main()
 
                 if (projPixel.x < 0 || projPixel.x > refSize.x || projPixel.y < 0 || projPixel.y > refSize.y)
                 {
-                    trackOutput[offset].result = -2;
+                    trackOutput[offset].result = -4;
                     imageStore(trackImage, ivec2(pix), vec4(1.0f, 0, 0, 1.0f));
                 }
                 else
@@ -87,7 +87,7 @@ void main()
 
                     if (virtNormal.x == -2)
                     {
-                        trackOutput[offset].result = -3;
+                        trackOutput[offset].result = -4;
                         imageStore(trackImage, ivec2(pix), vec4(0, 1.0f, 0, 1.0f));
                     }
                     else
@@ -109,7 +109,7 @@ void main()
                         }
                         else if (dot(projectedNormal, virtNormal) < normThresh)
                         {
-                            trackOutput[offset].result = -5;
+                            trackOutput[offset].result = -4;
                             imageStore(trackImage, ivec2(pix), vec4(1.0f, 1.0f, 0, 1.0f));
                         }
                         else

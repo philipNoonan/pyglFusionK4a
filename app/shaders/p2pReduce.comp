@@ -50,14 +50,6 @@ void main()
                 {
                     sums[29] += 1;
                 }
-                if (row.result == -5)
-                {
-                    sums[30] += 1;
-                }
-                if (row.result > -4)
-                {
-                    sums[31] += 1;
-                }
                 continue;
             }
 
