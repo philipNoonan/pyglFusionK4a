@@ -469,10 +469,12 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
                 if (resNorm < 1e-5 and resNorm != 0):
                     break
-            
+
     currPose = T
     if integrateFlag == True:
         integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+
+        return currPose
 
 def trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, tempT, level):
     glUseProgram(shaderDict['trackP2VShader'])
@@ -636,17 +638,19 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
     return currPose
 
-def reset(textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     generateTextures(textureDict, cameraConfig, fusionConfig)
     #generateBuffers(bufferDict, cameraConfig)
 
     currPose = glm.mat4(1.0)
-    currPose[3,0] = fusionConfig['volDim'][0] / 2.0
-    currPose[3,1] = fusionConfig['volDim'][1] / 2.0
-    currPose[3,2] = 0
+    currPose = glm.translate(glm.mat4(1.0), glm.vec3(-clickedPoint3D[0] + fusionConfig['volDim'][0] / 2.0, -clickedPoint3D[1] + fusionConfig['volDim'][0] / 2.0, -clickedPoint3D[2] + fusionConfig['volDim'][0] / 2.0))
+
+    #currPose[3,0] = (fusionConfig['volDim'][0] / 2.0) - clickedPoint3D[0]
+    #currPose[3,1] = (fusionConfig['volDim'][1] / 2.0) - clickedPoint3D[1]
+    #currPose[3,2] = (fusionConfig['volDim'][2] / 2.0) - clickedPoint3D[2]
 
     integrateFlag = 1
-    #resetFlag = 1
+    resetFlag = 0
 
     return currPose, integrateFlag, resetFlag
 
@@ -893,6 +897,7 @@ def main():
         'depthHeight' : 576,
         'colorWidth' : 1920,
         'colorHeight' : 1080,
+        'depthScale' : 0.001,
         'K' : K,
         'invK' : invK
     }
@@ -910,6 +915,8 @@ def main():
     initPose[3,2] = 0
 
 
+    mouseX, mouseY = 0, 0
+    clickedPoint3D = glm.vec4(fusionConfig['volDim'][0] / 2.0, fusionConfig['volDim'][1] / 2.0, 0, 0)
     sliderDim = fusionConfig['volDim'][0]
 
     #[32 64 128 256 512]
@@ -1027,8 +1034,8 @@ def main():
 
         mipmapTextures(textureDict)
 
-        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
         if resetFlag == True:
             resetFlag = False
@@ -1038,15 +1045,27 @@ def main():
         if imgui.button("Reset"):
             fusionConfig['volSize'] = (1 << (currentSize + 5), 1 << (currentSize + 5), 1 << (currentSize + 5))
             fusionConfig['volDim'] = (sliderDim, sliderDim, sliderDim)
-
-            currPose, integrateFlag, resetFlag = reset(textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+            currPose, integrateFlag, resetFlag = reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D)
             volumeStatsChanged = False
 
         changedDim, sliderDim = imgui.slider_float("dim", sliderDim, min_value=0.01, max_value=5.0)
-        #changedSize, sliderSize = imgui.slider_int("size", sliderSize, min_value=5, max_value=9, "hello")
+
         clickedSize, currentSize = imgui.combo(
             "size", currentSize, ["32", "64", "128", "256", "512"]
         )
+        
+        if imgui.is_mouse_clicked():
+            if not imgui.is_any_item_active():
+                mouseX, mouseY = imgui.get_mouse_pos()
+                w, h = glfw.get_framebuffer_size(window)
+                xPos = ((mouseX % int(w / 3)) / (w / 3) * cameraConfig['depthWidth'])
+                yPos = (mouseY / (h)) * cameraConfig['depthHeight']
+                clickedDepth = capture.depth[int(yPos+0.5), int(xPos+0.5)] * cameraConfig['depthScale']
+                clickedPoint3D = clickedDepth * (cameraConfig['invK'] * glm.vec4(xPos, yPos, 1.0, 0.0))
+                volumeStatsChanged = True
+             
+
+
 
         if changedDim or clickedSize:
             volumeStatsChanged = True
