@@ -636,6 +636,20 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
     return currPose
 
+def reset(textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
+    generateTextures(textureDict, cameraConfig, fusionConfig)
+    #generateBuffers(bufferDict, cameraConfig)
+
+    currPose = glm.mat4(1.0)
+    currPose[3,0] = fusionConfig['volDim'][0] / 2.0
+    currPose[3,1] = fusionConfig['volDim'][1] / 2.0
+    currPose[3,2] = 0
+
+    integrateFlag = 1
+    #resetFlag = 1
+
+    return currPose, integrateFlag, resetFlag
+
 def render(VAO, window, shaderDict, textureDict):
 
     glUseProgram(shaderDict['renderShader'])
@@ -682,7 +696,7 @@ def render(VAO, window, shaderDict, textureDict):
 
 def main():
 
-    useLiveKinect = False   
+    useLiveKinect = True   
 
     # # transform to convert the image to tensor
     # transform = transforms.Compose([
@@ -816,6 +830,7 @@ def main():
 
     invK = glm.inverse(K)
 
+
     #playback.configuration["color_format"] == ImageFormat.COLOR_MJPG
     #if k4a.configuration["depth_mode"] == pyk4a.DepthMode.NFOV_UNBINNED:
     #    print("hello")
@@ -863,14 +878,14 @@ def main():
 
     fusionConfig = {
         'volSize' : (256, 256, 256),
-        'volDim' : (4.0, 4.0, 4.0),
+        'volDim' : (1.0, 1.0, 1.0),
         'iters' : (2, 2, 2),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
         'nearPlane' : 0.1,
-        'farPlane' : 4.0
+        'farPlane' : 1.0
     }
 
     cameraConfig = {
@@ -895,42 +910,54 @@ def main():
     initPose[3,2] = 0
 
 
+    sliderDim = fusionConfig['volDim'][0]
+
+    #[32 64 128 256 512]
+    currentSize = math.log2(fusionConfig['volSize'][0]) - 5
+    volumeStatsChanged = False
+
     currPose = initPose
 
-    aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
-    bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
 
-    #setup pycuda gl interop needs to be after openGL is init
-    import pycuda.gl.autoinit
-    import pycuda.gl
-    cuda_gl = pycuda.gl
-    cuda_driver = pycuda.driver
-    from pycuda.compiler import SourceModule
-    import pycuda 
+    # aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
+    # bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
+
+    # #setup pycuda gl interop needs to be after openGL is init
+    # import pycuda.gl.autoinit
+    # import pycuda.gl
+    # cuda_gl = pycuda.gl
+    # cuda_driver = pycuda.driver
+    # from pycuda.compiler import SourceModule
+    # import pycuda 
     
-    pycuda_source_ssbo = cuda_gl.RegisteredBuffer(int(bufferDict['test']), cuda_gl.graphics_map_flags.NONE)
+    # pycuda_source_ssbo = cuda_gl.RegisteredBuffer(int(bufferDict['test']), cuda_gl.graphics_map_flags.NONE)
 
-    sm = SourceModule("""
-        __global__ void simpleCopy(float *inputArray, float *outputArray) {
-                unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
+    # sm = SourceModule("""
+    #     __global__ void simpleCopy(float *inputArray, float *outputArray) {
+    #             unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
 
-                outputArray[x] = inputArray[x];
-        }    
-    """)
+    #             outputArray[x] = inputArray[x];
+    #             inputArray[x] = 8008.135f;
+    #     }    
+    # """)
 
-    cuda_function = sm.get_function("simpleCopy")
+    # cuda_function = sm.get_function("simpleCopy")
 
-    mappingObj = pycuda_source_ssbo.map()
-    data, size = mappingObj.device_ptr_and_size()
+    # mappingObj = pycuda_source_ssbo.map()
+    # data, size = mappingObj.device_ptr_and_size()
 
-    cuda_function(np.intp(aa.data_ptr()), np.intp(data), block=(8, 1, 1))
+    # cuda_function(np.intp(aa.data_ptr()), np.intp(data), block=(8, 1, 1))
 
-    mappingObj.unmap()
+    # mappingObj.unmap()
 
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['test'])
-    tee = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
-    teeData = np.frombuffer(tee, dtype=np.float32)
+    # glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['test'])
+    # tee = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32)
+    # glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    # teeData = np.frombuffer(tee, dtype=np.float32)
+    # print(teeData)
+
+    # modTensor = aa.cpu().data.numpy()
+    # print(modTensor)
 
     
 
@@ -970,16 +997,20 @@ def main():
             break
 
         # #smallMat = cv2.pyrDown(colorMat)
+        # start_time = time.time()
         # rotMat = cv2.flip(colorMat, 0)
 
         # pil_image = Image.fromarray(rotMat).convert('RGB')
         # image = transform(pil_image)
+        
+
         # image = image.unsqueeze(0).to(device)
-        # #start_time = time.time()
+        # end_time = time.time()
+        # print((end_time - start_time) * 1000.0)
+
         # with torch.no_grad():
         #     outputs = model(image)
-        # #end_time = time.time()
-        # #print((end_time - start_time) * 1000.0)
+
         # output_image = utils.draw_keypoints(outputs, rotMat)
         # cv2.imshow('Face detection frame', output_image)
         # if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -1003,6 +1034,24 @@ def main():
             resetFlag = False
 
 
+        imgui.begin("Menu", True)
+        if imgui.button("Reset"):
+            fusionConfig['volSize'] = (1 << (currentSize + 5), 1 << (currentSize + 5), 1 << (currentSize + 5))
+            fusionConfig['volDim'] = (sliderDim, sliderDim, sliderDim)
+
+            currPose, integrateFlag, resetFlag = reset(textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+            volumeStatsChanged = False
+
+        changedDim, sliderDim = imgui.slider_float("dim", sliderDim, min_value=0.01, max_value=5.0)
+        #changedSize, sliderSize = imgui.slider_int("size", sliderSize, min_value=5, max_value=9, "hello")
+        clickedSize, currentSize = imgui.combo(
+            "size", currentSize, ["32", "64", "128", "256", "512"]
+        )
+
+        if changedDim or clickedSize:
+            volumeStatsChanged = True
+
+        imgui.end()
 
         render(VAO, window, shaderDict, textureDict)
 
