@@ -684,17 +684,17 @@ def main():
 
     useLiveKinect = False   
 
-    # transform to convert the image to tensor
-    transform = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    # initialize the model
-    model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
-                                                                num_keypoints=17)
-    # set the computation device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # load the modle on to the computation device and set to eval mode
-    model.to(device).eval()
+    # # transform to convert the image to tensor
+    # transform = transforms.Compose([
+    #     transforms.ToTensor()
+    # ])
+    # # initialize the model
+    # model = torchvision.models.detection.keypointrcnn_resnet50_fpn(pretrained=True,
+    #                                                             num_keypoints=17)
+    # # set the computation device
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # # load the modle on to the computation device and set to eval mode
+    # model.to(device).eval()
 
     # initialize glfw
     if not glfw.init():
@@ -897,6 +897,8 @@ def main():
 
     currPose = initPose
 
+    aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
+    bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
 
     #setup pycuda gl interop needs to be after openGL is init
     import pycuda.gl.autoinit
@@ -907,9 +909,6 @@ def main():
     import pycuda 
     
     pycuda_source_ssbo = cuda_gl.RegisteredBuffer(int(bufferDict['test']), cuda_gl.graphics_map_flags.NONE)
-
-    aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
-    bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
 
     sm = SourceModule("""
         __global__ void simpleCopy(float *inputArray, float *outputArray) {
