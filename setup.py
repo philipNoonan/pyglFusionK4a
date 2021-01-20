@@ -11,7 +11,8 @@ requirements = [
     'opencv-python',
     'imgui',
     'pyk4a',
-    'PyGLM'
+    'PyGLM',
+    'pycuda'
 ]
 
 setup(

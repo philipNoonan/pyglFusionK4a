@@ -9,6 +9,15 @@ Tested running on win10 with python 3.8 x64
 $ pip install git+https://github.com/philipNoonan/pyglFusionK4a.git
 ```
 
+This may work, if not, then look at the setup.py and the imports and install things that sound like they should be installed. 
+
+pycuda needs to be installed from source (i.e. not with pip install) with the following line added to the siteconf.py file created from running the configure.py script.
+
+```
+CUDA_ENABLE_GL = True
+````
+
+
 ## Using pyglFusion
 
 
