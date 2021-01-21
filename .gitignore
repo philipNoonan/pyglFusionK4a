@@ -87,7 +87,7 @@ celerybeat-schedule
 .venv
 venv/
 ENV/
-pyglFusionK4A-venv/
+pyglFusionK4A-env/
 
 # Spyder project settings
 .spyderproject

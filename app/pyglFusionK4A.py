@@ -7,7 +7,6 @@ import math
 
 import numpy as np
 from scipy import linalg
-from scipy.spatial.transform import Rotation as R
 
 from glob import glob
 import cv2
@@ -17,13 +16,13 @@ import imgui
 from imgui.integrations.glfw import GlfwRenderer
 from pathlib import Path
 
-from ctypes import c_wchar_p, windll  
-from ctypes.wintypes import DWORD
-
-AddDllDirectory = windll.kernel32.AddDllDirectory
-AddDllDirectory.restype = DWORD
-AddDllDirectory.argtypes = [c_wchar_p]
-AddDllDirectory(r"C:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\amd64\release\bin") # modify path there if required
+if os.name == 'nt':
+    from ctypes import c_wchar_p, windll  
+    from ctypes.wintypes import DWORD
+    AddDllDirectory = windll.kernel32.AddDllDirectory
+    AddDllDirectory.restype = DWORD
+    AddDllDirectory.argtypes = [c_wchar_p]
+    AddDllDirectory(r"C:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\amd64\release\bin") # modify path there if required
 
 import pyk4a
 from pyk4a import PyK4APlayback
@@ -31,12 +30,12 @@ from pyk4a import ImageFormat
 from pyk4a import Config, PyK4A
 import json
 
-import torch
-import torchvision
-import utils
+#import torch
+#import torchvision
+#import utils
 
-from PIL import Image, ImageOps
-from torchvision.transforms import transforms as transforms
+#from PIL import Image, ImageOps
+#from torchvision.transforms import transforms as transforms
 
 import time
 
@@ -325,7 +324,7 @@ def getReductionP2P(bufferDict):
             shift += 1 # check this offset
             value = reductionData[shift]
             matA[j][i] = matA[i][j] = value
-
+    
     AE = np.sqrt(reductionData[0] / reductionData[28])
     icpCount = reductionData[28]
 
@@ -393,7 +392,6 @@ def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPos
 
 def resultToMatrix(result):
     # from https://github.com/g-truc/glm/tree/master/glm/gtx/euler_angles.inl
-    delta = glm.mat4(1.0)
 
     c1 = math.cos(-result[3])
     c2 = math.cos(-result[4])
@@ -401,25 +399,15 @@ def resultToMatrix(result):
     s1 = math.sin(-result[3])
     s2 = math.sin(-result[4])
     s3 = math.sin(-result[5])
-        
-    delta[0, 0] = c2 * c3
-    delta[0, 1] =-c1 * s3 + s1 * s2 * c3
-    delta[0, 2] = s1 * s3 + c1 * s2 * c3
-    #delta[0, 3] = 0
-    delta[1, 0] = c2 * s3
-    delta[1, 1] = c1 * c3 + s1 * s2 * s3
-    delta[1, 2] =-s1 * c3 + c1 * s2 * s3
-    #delta[1, 3] = 0
-    delta[2, 0] =-s2
-    delta[2, 1] = s1 * c2
-    delta[2, 2] = c1 * c2
-    #delta[2, 3] = 0
-    delta[3, 0] = result[0]
-    delta[3, 1] = result[1]
-    delta[3, 2] = result[2]
-    #delta[3, 3] = 1
-    
-    return delta    
+
+    delta = glm.mat4(
+        c2 * c3,   -c1 * s3 + s1 * s2 * c3,    s1 * s3 + c1 * s2 * c3,   0, 
+        c2 * s3,    c1 * c3 + s1 * s2 * s3,   -s1 * c3 + c1 * s2 * s3,   0,
+       -s2,         s1 * c2,                   c1 * c2,                  0, 
+        result[0],  result[1],                 result[2],                1.0
+    )
+
+    return delta
 
 def twist(xi):
 
@@ -435,7 +423,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
     T = currPose
 
-    for level in range(np.size(fusionConfig['iters']), -1, -1):
+    for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
             
             p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, T, level)
@@ -444,8 +432,6 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
             A, b, AE, icpCount = getReductionP2P(bufferDict)
 
-            #sTime = time.time()
-            
             if (icpCount > 0):
                 try:
                     result = linalg.solve(A, b)
@@ -454,10 +440,9 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
                 except:
                     result = np.zeros((6, 1), dtype='double')
                     continue
-           
+                
                 delta = resultToMatrix(result)
-
-                #d = glm.mat4(delta)
+            #     #d = glm.mat4(delta)
 
                 T = delta * T
                 #print(AE, icpCount)
@@ -573,10 +558,13 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
         for iter in range(fusionConfig['iters'][level - 1]):
 
             tempTarr = linalg.expm(np.array(twist(result)))
-            tempTmat = glm.mat4(0)
-            for i in range(4):
-                for j in range(4):
-                    tempTmat[i, j] = tempTarr[i][j]
+            # pyglm errors out with an invalid pointer on the jetson nx if we dont init all at once
+            tempTmat = glm.mat4(
+                tempTarr[0][0], tempTarr[0][1], tempTarr[0][2], tempTarr[0][3],
+                tempTarr[1][0], tempTarr[1][1], tempTarr[1][2], tempTarr[1][3],
+                tempTarr[2][0], tempTarr[2][1], tempTarr[2][2], tempTarr[2][3],
+                tempTarr[3][0], tempTarr[3][1], tempTarr[3][2], tempTarr[3][3]
+            )
 
             currT = tempTmat * T
             
@@ -619,10 +607,13 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
         result = np.zeros((6, 1), dtype='double')
 
     lnpa2 = linalg.expm(np.array(twist(result)))
-    glnpa2 = glm.mat4(0)
-    for i in range(4):
-        for j in range(4):
-            glnpa2[i, j] = lnpa2[i][j]
+
+    glnpa2 = glm.mat4(
+        lnpa2[0][0], lnpa2[0][1], lnpa2[0][2], lnpa2[0][3],
+        lnpa2[1][0], lnpa2[1][1], lnpa2[1][2], lnpa2[1][3],
+        lnpa2[2][0], lnpa2[2][1], lnpa2[2][2], lnpa2[2][3],
+        lnpa2[3][0], lnpa2[3][1], lnpa2[3][2], lnpa2[3][3]
+    )
 
     currPose = glnpa2 * T 
                     
@@ -746,9 +737,9 @@ def main():
 
     indices = np.array(indices, dtype= np.uint32)
 
-    screenVertex_shader = (Path(__file__).parent / 'shaders/screenQuad.vert').read_text()
+    screenVertex_shader = (Path(__file__).parent / 'shaders/ScreenQuad.vert').read_text()
 
-    screenFragment_shader = (Path(__file__).parent / 'shaders/screenQuad.frag').read_text()
+    screenFragment_shader = (Path(__file__).parent / 'shaders/ScreenQuad.frag').read_text()
 
     renderShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(screenVertex_shader, GL_VERTEX_SHADER),
                                               OpenGL.GL.shaders.compileShader(screenFragment_shader, GL_FRAGMENT_SHADER))
@@ -881,7 +872,7 @@ def main():
     }
 
     fusionConfig = {
-        'volSize' : (256, 256, 256),
+        'volSize' : (128, 128, 128),
         'volDim' : (1.0, 1.0, 1.0),
         'iters' : (2, 2, 2),
         'initOffset' : (0, 0, 0),
@@ -1034,8 +1025,8 @@ def main():
 
         mipmapTextures(textureDict)
 
-        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
         if resetFlag == True:
             resetFlag = False
