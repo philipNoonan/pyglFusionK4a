@@ -32,6 +32,10 @@ void main()
 	int devNumber = 0;
     uint sline = gl_LocalInvocationID.x; // 0 - 111
 
+    if (gl_GlobalInvocationID.x > imSize.x) {
+        return;
+    }
+
     float sums[32];
 
     for (int i = 0; i < 32; ++i)
@@ -53,7 +57,7 @@ void main()
             {
                 if (row.result == -4)
                 {
-                    sums[28] += 1;
+                    sums[29] += 1;
 
                 }
                 continue;

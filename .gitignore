@@ -109,3 +109,4 @@ pyglFusionK4A-env/
 # Custom
 data/*
 app/models/*
+testing.py

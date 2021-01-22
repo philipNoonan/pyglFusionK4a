@@ -45,6 +45,10 @@ void main()
     ivec2 imSize = imageSize(refVertex); // mipmapped sizes
     ivec2 refSize = imageSize(virtualVertex); // full depth size
 
+    if (pix.x > imSize.x || pix.y > imSize.y) {
+        return;
+    }
+
     for (int camera = 0; camera < numberOfCameras; camera++)
     {
         uint offset = uint(camera * imSize.x * imSize.y) + ((pix.y * imSize.x) + pix.x);
