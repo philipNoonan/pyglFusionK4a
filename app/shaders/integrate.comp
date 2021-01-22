@@ -58,6 +58,10 @@ void integrate()
     ivec2 depthSize = ivec2(imageSize(currVertexMap).xy);
     uvec3 pix = gl_GlobalInvocationID.xyz;
 
+    if (pix.x > volSize || pix.y > volSize) {
+        return;
+    }
+
     float diff[4]; // max number of cameras on one system
 
     vec4 track[4];
@@ -79,7 +83,7 @@ void integrate()
 
 
             // if we dont check if we hit the image here and just assume that if pixel is out of bounds the resultant texture read will be zero
-            if (px.x < 0 || px.x > depthSize.x - 1 || px.y < 0 || px.y > depthSize.y - 1)
+            if (px.x <= 0 || px.x > depthSize.x || px.y <= 0 || px.y > depthSize.y)
             {
                 diff[cameraDevice] = -10000.0f;
                 continue;

@@ -64,7 +64,7 @@ def createBuffer(buffer, bufferType, size, usage):
 def generateBuffers(bufferDict, cameraConfig):
     
     p2pRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 8 * 4 # 8 float32 per depth pixel for reduction struct
-    p2pRedOutBufSize = 32 * 8 * 4
+    p2pRedOutBufSize = 32 * 4 * 4 # 32 outs per local group, upto 4 local groups running on highest def layer
     p2vRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 9 * 4 # 9 float32 per depth pixel for reduction struct
     p2vRedOutBufSize = 32 * 8 * 4
 
@@ -284,25 +284,28 @@ def p2pReduce(shaderDict, bufferDict, cameraConfig, level):
 
     glUniform2i(glGetUniformLocation(shaderDict['reduceP2PShader'], "imSize"), int(cameraConfig['depthWidth'] >> level), int(cameraConfig['depthHeight'] >> level))
 
-    glDispatchCompute(8, 1, 1)
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+    glDispatchCompute(4 >> level, 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def getReductionP2P(bufferDict):        
+def getReductionP2P(bufferDict, level):        
 
-    sTime = time.perf_counter()
+    #sTime = time.perf_counter()
 
-    #void_ptr = ctypes.c_void_p(ctypes.addressof(float32_data))
+    void_ptr = ctypes.c_void_p(ctypes.addressof(float32_data))
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2pRedOut'])
-    #glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32 * 8 * 4, void_ptr)
-    tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 32 * 8 * 4)
-
+    #glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, (640 >> level) * 4, void_ptr)
+    tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, (32 * (4 >> level)) * 4)
+    # level 2 = 160
+    # level 1 = 320
+    # level 0 = 640
+    #  
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
-    eTime = time.perf_counter()
-    print((eTime - sTime) * 1000)
+    #eTime = time.perf_counter()
+    #print((eTime - sTime) * 1000)
 
-    #reductionData = np.ctypeslib.as_array(ctypes.cast(void_ptr, ctypes.POINTER(ctypes.c_float)), (1024,))
+    #reductionData = np.ctypeslib.as_array(ctypes.cast(void_ptr, ctypes.POINTER(ctypes.c_float)), (640 >> level,))
     reductionData = np.frombuffer(tempData, dtype=np.float32)
 
 
@@ -327,10 +330,10 @@ def getReductionP2P(bufferDict):
 	# 	count = [28]
 
     vecb = np.zeros((6, 1), dtype='double')
-    matA = np.zeros((6, 6), dtype='double')
+    matA = np.zeros((6, 6), dtype='double')  
 
-    for row in range(1, 7, 1):
-        for col in range(0, 31, 1):
+    for row in range(1, (4 >> level), 1):
+        for col in range(0, 32, 1):
             reductionData[col] += reductionData[col + (row * 32)]
 
     for i in range(1, 7, 1):
@@ -448,8 +451,9 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
-            A, b, AE, icpCount = getReductionP2P(bufferDict)
-
+           # sTime = time.perf_counter()
+            A, b, AE, icpCount = getReductionP2P(bufferDict, level)
+          #  print('level : ', level, ((time.perf_counter() - sTime) * 1000))
             if (icpCount > 0):
                 try:
                     result = linalg.solve(A, b)
@@ -514,7 +518,7 @@ def reduceP2V(shaderDict, bufferDict, cameraConfig, level):
     glUniform2i(glGetUniformLocation(shaderDict['reduceP2VShader'], "imSize"), cameraConfig['depthWidth'] >> level, cameraConfig['depthHeight'] >> level)
 
     glDispatchCompute(8, 1, 1)
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 def getReductionP2V(bufferDict):        
     #sTime = time.perf_counter()
@@ -578,10 +582,10 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
             
-            sTime = time.perf_counter()
+            #sTime = time.perf_counter()
             
             tempTarr = linalg.expm(np.array(twist(result)))
-            eTime = time.perf_counter()
+            #eTime = time.perf_counter()
 
             # pyglm errors out with an invalid pointer on the jetson nx if we dont init all at once
             tempTmat = glm.mat4(
@@ -593,7 +597,7 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
             currT = tempTmat * T
             
-            print('level : ', level, (eTime - sTime) * 1000.0)
+            #print('level : ', level, (eTime - sTime) * 1000.0)
 
             trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currT, level)
 
@@ -997,6 +1001,8 @@ def main():
         glfw.poll_events()
         impl.process_inputs()
         imgui.new_frame()
+        
+        sTime = time.perf_counter()
 
 
         try:
@@ -1053,9 +1059,10 @@ def main():
 
         mipmapTextures(textureDict)
 
-        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-
+        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        eTime = time.perf_counter()
+        print((eTime-sTime) * 1000)
         if resetFlag == True:
             resetFlag = False
             integrateFlag = True

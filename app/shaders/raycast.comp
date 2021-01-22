@@ -3,8 +3,8 @@
 layout(local_size_x = 32, local_size_y = 32) in;
     
 layout(binding = 0, rg16f) readonly uniform image3D volumeData; 
-layout(binding = 1, rgba32f) writeonly uniform image2D refVertex;
-layout(binding = 2, rgba32f) writeonly uniform image2D refNormal;
+layout(binding = 1, rgba32f) writeonly uniform image2D virtualVertex;
+layout(binding = 2, rgba32f) writeonly uniform image2D virtualNormal;
 
 uniform mat4 view;
 uniform vec3 initOffset;
@@ -111,7 +111,7 @@ float interpDistance(vec3 pos, inout bool interpolated)
     return sum_d / w_sum;
 }
 
-vec4 raycast(uvec2 pos, int camera)
+vec4 raycast(ivec2 pos, int camera)
 {
     vec3 origin = vec3(view[3][0], view[3][1], view[3][2]);
 
@@ -259,11 +259,14 @@ vec3 getGradient(vec4 hit)
 
 void main()
 {
-   // ivec2 depthSize = ivec2(512, 424); // imageSize(depthImage);
-   int numberOfCameras = 1;
-    uvec2 pix = gl_GlobalInvocationID.xy;
+    int numberOfCameras = 1;
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 imSize = ivec2(imageSize(virtualVertex));
 
-	//imageStore(refNormal, ivec2(pix), vec4(0.3,0.2,0.1, 1.0f));
+
+    if (pix.x > imSize.x || pix.y > imSize.y) {
+        return;
+    }
 
 
     for (int camera = 0; camera < numberOfCameras; camera++)
@@ -273,13 +276,13 @@ void main()
         if (hit.w > 0)
         {
             vec3 adjustedHit = vec3(hit.x - initOffset.x, hit.y - initOffset.y, hit.z - initOffset.z);
-            imageStore(refVertex, ivec2(pix), vec4(adjustedHit.xyz, 1.0f));
+            imageStore(virtualVertex, ivec2(pix), vec4(adjustedHit.xyz, 1.0f));
 
             vec3 surfNorm = getGradient(hit);// volume.grad(make_float3(hit));
             if (length(surfNorm) == 0)
             {
                 //imageStore(volumeSliceNorm, ivec2(pix), vec4(0, 0, 0, 0));
-                imageStore(refNormal, ivec2(pix), vec4(0.0f));
+                imageStore(virtualNormal, ivec2(pix), vec4(0.0f));
                 //  NormalTSDF[(pix.y * depthSize.x) + pix.x] = vec4(0);
             }
             else
@@ -288,7 +291,7 @@ void main()
 
                 //imageStore(volumeSliceNorm, ivec2(pix), vec4(normalize(surfNorm), 0.0f));
                 // NormalTSDF[(pix.y * depthSize.x) + pix.x] = vec4(normalize(surfNorm), 0.0f);
-                imageStore(refNormal, ivec2(pix), vec4(normalize(surfNorm), 1.0f));
+                imageStore(virtualNormal, ivec2(pix), vec4(normalize(surfNorm), 1.0f));
 
             }
         }
@@ -296,8 +299,8 @@ void main()
         {
             //imageStore(volumeSlice, ivec2(pix), vec4(hit.z / 2.0f, 0, 0, 0));
             //imageStore(volumeSliceNorm, ivec2(pix), vec4(0, 0, 0, 0));
-            imageStore(refVertex, ivec2(pix), vec4(0.0f));
-            imageStore(refNormal, ivec2(pix), vec4(0.0f));
+            imageStore(virtualVertex, ivec2(pix), vec4(0.0f));
+            imageStore(virtualNormal, ivec2(pix), vec4(0.0f));
 
             //PositionTSDF[(pix.y * depthSize.x) + pix.x] = vec4(0);
             // NormalTSDF[(pix.y * depthSize.x) + pix.x] = vec4(0, 0, 0, 0); // set x = 2??

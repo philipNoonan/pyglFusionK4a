@@ -41,7 +41,7 @@ layout(std430, binding = 0) buffer TrackData
 void main()
 {
 	int numberOfCameras = 1;
-    uvec2 pix = gl_GlobalInvocationID.xy;
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
     ivec2 imSize = imageSize(refVertex); // mipmapped sizes
     ivec2 refSize = imageSize(virtualVertex); // full depth size
 
@@ -51,7 +51,7 @@ void main()
 
     for (int camera = 0; camera < numberOfCameras; camera++)
     {
-        uint offset = uint(camera * imSize.x * imSize.y) + ((pix.y * imSize.x) + pix.x);
+        uint offset = uint(camera * imSize.x * imSize.y) + uint((pix.y * imSize.x) + pix.x);
 
         if (pix.x < imSize.x && pix.y < imSize.y)
         {
