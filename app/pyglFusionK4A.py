@@ -75,6 +75,8 @@ def generateBuffers(bufferDict, cameraConfig):
     bufferDict['p2vRedOut'] = createBuffer(bufferDict['p2vRedOut'], GL_SHADER_STORAGE_BUFFER, p2vRedOutBufSize, GL_DYNAMIC_DRAW)
 
     bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, GL_DYNAMIC_DRAW)
+    bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 4, GL_DYNAMIC_DRAW)
 
     return bufferDict
 
@@ -291,7 +293,7 @@ def getReductionP2P(bufferDict, level):
 
     #sTime = time.perf_counter()
 
-    void_ptr = ctypes.c_void_p(ctypes.addressof(float32_data))
+    #void_ptr = ctypes.c_void_p(ctypes.addressof(float32_data))
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2pRedOut'])
     #glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, (640 >> level) * 4, void_ptr)
@@ -350,6 +352,25 @@ def getReductionP2P(bufferDict, level):
     icpCount = reductionData[28]
 
     return matA, vecb, AE, icpCount
+
+def solveP2P(shaderDict, bufferDict, level):
+    glUseProgram(shaderDict['LDLTShader'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pRedOut'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['poseBuffer'])
+
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "mip"), level)
+
+    glDispatchCompute(1, 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
+    tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    reductionData = np.frombuffer(tempData, dtype=np.float32)
+
+    return reductionData
+
 
 def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose):
     glUseProgram(shaderDict['raycastVolumeShader'])
@@ -452,12 +473,16 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
            # sTime = time.perf_counter()
+            redu = solveP2P(shaderDict, bufferDict, level)
+
             A, b, AE, icpCount = getReductionP2P(bufferDict, level)
           #  print('level : ', level, ((time.perf_counter() - sTime) * 1000))
             if (icpCount > 0):
                 try:
                     result = linalg.solve(A, b)
-                    #lu, piv = linalg.lu_factor(A)
+                    c, low = linalg.cho_factor(A)
+                    res2 = linalg.cho_solve((c, low), b)
+                    print('done')
                     #result = linalg.lu_solve((lu, piv), b)
                 except:
                     result = np.zeros((6, 1), dtype='double')
@@ -823,6 +848,8 @@ def main():
     reduceP2V_shader = (Path(__file__).parent / 'shaders/p2vReduce.comp').read_text()
     reduceP2VShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(reduceP2V_shader, GL_COMPUTE_SHADER))
 
+    LDLT_shader = (Path(__file__).parent / 'shaders/LDLT.comp').read_text()
+    LDLTShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(LDLT_shader, GL_COMPUTE_SHADER))
 
     if useLiveKinect == False:
         k4a = PyK4APlayback("C:\data\outSess1.mkv")
@@ -868,7 +895,8 @@ def main():
         'trackP2PShader' : trackP2PShader,
         'reduceP2PShader' : reduceP2PShader,
         'trackP2VShader' : trackP2VShader,
-        'reduceP2VShader' : reduceP2VShader
+        'reduceP2VShader' : reduceP2VShader,
+        'LDLTShader' : LDLTShader
     }
 
     bufferDict = {
@@ -876,7 +904,9 @@ def main():
         'p2pRedOut' : -1,
         'p2vReduction' : -1,
         'p2vRedOut' : -1,
-        'test' : -1
+        'test' : -1,
+        'outBuf' : -1,
+        'poseBuffer' : -1
     }
 
     textureDict = {
@@ -902,7 +932,7 @@ def main():
     fusionConfig = {
         'volSize' : (128, 128, 128),
         'volDim' : (1.0, 1.0, 1.0),
-        'iters' : (2, 2, 2),
+        'iters' : (2, 5, 10),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
@@ -934,7 +964,9 @@ def main():
     initPose[3,2] = 0
 
 
-
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
+    glBufferData(GL_SHADER_STORAGE_BUFFER, 16 * 4, glm.value_ptr(initPose), GL_DYNAMIC_COPY)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
 
     mouseX, mouseY = 0, 0
@@ -1002,7 +1034,6 @@ def main():
         impl.process_inputs()
         imgui.new_frame()
         
-        sTime = time.perf_counter()
 
 
         try:
@@ -1015,6 +1046,7 @@ def main():
                     if k4a.configuration["color_format"] == ImageFormat.COLOR_MJPG:
                         colorMat = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
                         useColorMat = True
+                sTime = time.perf_counter()
 
                 glActiveTexture(GL_TEXTURE0)
                 glBindTexture(GL_TEXTURE_2D, textureDict['lastColor'])

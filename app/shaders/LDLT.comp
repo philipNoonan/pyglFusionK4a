@@ -1,0 +1,226 @@
+#version 430
+
+layout(local_size_z = 1, local_size_y = 1) in; // 
+
+layout(std430, binding = 0) buffer reductionBuffer
+{
+    float inputReduction [];
+};
+
+layout(std430, binding = 1) buffer poseBuffer
+{
+    mat4 pose;
+};
+
+uniform int mip;
+
+void reshapeData(out float A[6][6], out float b[6]) {
+    
+    for (int i = 1; i < (4 >> mip); i++) {
+        for (int j = 0; j < 32; j++) {
+            inputReduction[j] += inputReduction[j + (i * 32)];
+        }
+    }
+    for (int i = 1; i < 7; i++) {
+        b[i - 1] = inputReduction[i];
+    }
+    // int shift = 7;
+    // for (int i = 0; i < 6; i++) {
+    //     for (int j = 0; j < 6; j++) {
+    //         float value = inputReduction[shift++];
+    //         A[i][j] = A[j][i] = value;
+    //     }
+    // }
+
+    A[0][0] = inputReduction[7];
+    A[0][1] = inputReduction[8];
+    A[0][2] = inputReduction[9];
+    A[0][3] = inputReduction[10];
+    A[0][4] = inputReduction[11];
+    A[0][5] = inputReduction[12];
+
+    A[1][0] = inputReduction[8];
+    A[1][1] = inputReduction[13];
+    A[1][2] = inputReduction[14];
+    A[1][3] = inputReduction[15];
+    A[1][4] = inputReduction[16];
+    A[1][5] = inputReduction[17];
+
+    A[2][0] = inputReduction[9];
+    A[2][1] = inputReduction[14];
+    A[2][2] = inputReduction[18];
+    A[2][3] = inputReduction[19];
+    A[2][4] = inputReduction[20];
+    A[2][5] = inputReduction[21];
+
+    A[3][0] = inputReduction[10];
+    A[3][1] = inputReduction[15];
+    A[3][2] = inputReduction[19];
+    A[3][3] = inputReduction[22];
+    A[3][4] = inputReduction[23];
+    A[3][5] = inputReduction[24];
+
+    A[4][0] = inputReduction[11];
+    A[4][1] = inputReduction[16];
+    A[4][2] = inputReduction[20];
+    A[4][3] = inputReduction[23];
+    A[4][4] = inputReduction[25];
+    A[4][5] = inputReduction[26];
+
+    A[5][0] = inputReduction[12];
+    A[5][1] = inputReduction[17];
+    A[5][2] = inputReduction[21];
+    A[5][3] = inputReduction[24];
+    A[5][4] = inputReduction[26];
+    A[5][5] = inputReduction[27];
+} 
+
+void main() {
+    int n = 6;
+
+    float A[6][6];
+    float b[6];
+    
+    reshapeData(A, b);
+
+    float L[6][6];
+    float d[6];
+    float v[6];
+    float s[6];
+
+    for (int i = 0; i < n; i++) {
+        v[i] = 0.0f;
+        d[i] = 0.0f;
+        for (int j = 0; j < n; j++) {
+            L[i][j] = 0.0f;
+        }
+    }
+
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j <= i; j++) {
+            float tempSum = 0.0f;
+            for (int k = 0; k < j; k++) {
+                tempSum += L[i][k] * L[j][k];
+            }
+
+            if (i == j) {
+                L[i][j] = sqrt(A[i][i] - tempSum);
+            }
+            else {
+                L[i][j] = (1.0f / L[j][j] * (A[i][j] - tempSum));
+            }
+        }
+    }
+
+
+    // forward subs
+    float z[6];
+
+    z[0] = (b[0])                                                                                                / L[0][0];
+    z[1] = (b[1] - (L[1][0] * z[0]))                                                                             / L[1][1];
+    z[2] = (b[2] - (L[2][0] * z[0]) - (L[2][1] * z[1]))                                                          / L[2][2];
+    z[3] = (b[3] - (L[3][0] * z[0]) - (L[3][2] * z[2]) - (L[3][1] * z[1]))                                       / L[3][3];
+    z[4] = (b[4] - (L[4][0] * z[0]) - (L[4][3] * z[3]) - (L[4][2] * z[2]) - (L[4][1] * z[1]))                    / L[4][4];
+    z[5] = (b[5] - (L[5][0] * z[0]) - (L[5][4] * z[4]) - (L[5][3] * z[3]) - (L[5][2] * z[2]) - (L[5][1] * z[1])) / L[5][5];
+
+    // backward subs
+    float x[6];
+
+    x[5] = (z[5])                                                                                                / L[5][5];
+    x[4] = (z[4] - (L[4][5] * z[5]))                                                                             / L[4][4];
+    x[3] = (z[3] - (L[3][4] * z[4]) - (L[3][5] * z[5]))                                                          / L[3][3];
+    x[2] = (z[2] - (L[2][3] * z[3]) - (L[2][4] * z[4]) - (L[2][5] * z[5]))                                       / L[2][2];
+    x[1] = (z[1] - (L[1][2] * z[2]) - (L[1][3] * z[3]) - (L[1][4] * z[4]) - (L[1][5] * z[5]))                    / L[1][1];
+    x[0] = (z[0] - (L[0][1] * z[1]) - (L[0][2] * z[2]) - (L[0][3] * z[3]) - (L[0][4] * z[4]) - (L[0][5] * z[5])) / L[0][0]; 
+
+    if (isnan(x[0]) || isnan(x[1]) || isnan(x[2]) || isnan(x[3]) || isnan(x[4]) || isnan(x[5])) {
+        return;
+    }
+
+    float c1 = cos(-x[3]);
+    float c2 = cos(-x[4]);
+    float c3 = cos(-x[5]);
+    float s1 = sin(-x[3]);
+    float s2 = sin(-x[4]);
+    float s3 = sin(-x[5]);
+
+    mat4 delta = mat4(
+        c2 * c3,   -c1 * s3 + s1 * s2 * c3,    s1 * s3 + c1 * s2 * c3,   0, 
+        c2 * s3,    c1 * c3 + s1 * s2 * s3,   -s1 * c3 + c1 * s2 * s3,   0,
+       -s2,         s1 * c2,                   c1 * c2,                  0, 
+        x[0],  x[1],                 x[2],                1.0
+    );
+
+    mat4 outPose = delta * pose;
+
+
+    pose = outPose;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // for (int j = 0; j < n; j++) {
+    //     //float v[j - 1];
+
+    //     if (j > 0) {
+    //         for (int k = 0; k < j; k++) {
+    //             v[k] = L[k][j] * d[k];
+    //         }
+    //         float tempsum = 0.0f;
+    //         for (int k = 0; k < j; k++) {
+    //             tempsum += L[k][j] * v[k]; // dot prod?
+    //         }
+    //         v[j] = A[j][j] - tempsum;
+    //         d[j] = v[j];
+
+    //         if (j < (n - 1)) {              
+    //             for (int a = j; a < (n - 1); a++) { // for each row 
+    //                 float tempsum1 = 0.0f;
+    //                 for (int b = 0; b < j; b++) { // the internal mat mul
+    //                     tempsum1 += L[b][a] * v[b];
+    //                 }
+    //                 L[j][a] = (A[j][a] - tempsum1) / v[j -1];
+    //             }
+    //         }
+    //     }
+    //     else {
+    //         v[0] = A[0][0];
+    //         d[0] = v[0];
+    //         for (int j = 1; j < n; j++) {
+    //             L[0][j] = A[0][j] / v[0];
+    //         }
+    //     }
+
+    // }
+
+    // for (int i = 0; i < n; i++) {
+    //     L[i][i] = 1.0f;
+    // }
+
+    //for (int i = 0; i < n; i++) {
+
+    //}
+
+}
