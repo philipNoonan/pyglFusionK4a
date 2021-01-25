@@ -364,12 +364,12 @@ def solveP2P(shaderDict, bufferDict, level):
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
-    tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
-    reductionData = np.frombuffer(tempData, dtype=np.float32)
+    # glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
+    # tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4)
+    # glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+    # reductionData = np.frombuffer(tempData, dtype=np.float32)
 
-    return reductionData
+    # return reductionData
 
 
 def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose):
@@ -473,34 +473,34 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
            # sTime = time.perf_counter()
-            redu = solveP2P(shaderDict, bufferDict, level)
+            solveP2P(shaderDict, bufferDict, level)
 
-            A, b, AE, icpCount = getReductionP2P(bufferDict, level)
-          #  print('level : ', level, ((time.perf_counter() - sTime) * 1000))
-            if (icpCount > 0):
-                try:
-                    result = linalg.solve(A, b)
-                    c, low = linalg.cho_factor(A)
-                    res2 = linalg.cho_solve((c, low), b)
-                    print('done')
-                    #result = linalg.lu_solve((lu, piv), b)
-                except:
-                    result = np.zeros((6, 1), dtype='double')
-                    continue
+        #     A, b, AE, icpCount = getReductionP2P(bufferDict, level)
+        #   #  print('level : ', level, ((time.perf_counter() - sTime) * 1000))
+        #     if (icpCount > 0):
+        #         try:
+        #             result = linalg.solve(A, b)
+        #             c, low = linalg.cho_factor(A)
+        #             res2 = linalg.cho_solve((c, low), b)
+        #             print('done')
+        #             #result = linalg.lu_solve((lu, piv), b)
+        #         except:
+        #             result = np.zeros((6, 1), dtype='double')
+        #             continue
                 
-                delta = resultToMatrix(result)
-            #     #d = glm.mat4(delta)
+        #         delta = resultToMatrix(result)
+        #     #     #d = glm.mat4(delta)
 
-                T = delta * T
-                #print(AE, icpCount)
+        #         T = delta * T
+        #         #print(AE, icpCount)
 
-                #eTime = time.time()
-                #print((eTime - sTime) * 1000)
+        #         #eTime = time.time()
+        #         #print((eTime - sTime) * 1000)
 
-                resNorm = linalg.norm(result)
+        #         resNorm = linalg.norm(result)
 
-                if (resNorm < 1e-5 and resNorm != 0):
-                    break
+        #         if (resNorm < 1e-5 and resNorm != 0):
+        #             break
 
     currPose = T
     if integrateFlag == True or resetFlag == True:
@@ -1035,6 +1035,7 @@ def main():
         imgui.new_frame()
         
 
+        sTime = time.perf_counter()
 
         try:
             if useLiveKinect == False:
@@ -1046,7 +1047,6 @@ def main():
                     if k4a.configuration["color_format"] == ImageFormat.COLOR_MJPG:
                         colorMat = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
                         useColorMat = True
-                sTime = time.perf_counter()
 
                 glActiveTexture(GL_TEXTURE0)
                 glBindTexture(GL_TEXTURE_2D, textureDict['lastColor'])
