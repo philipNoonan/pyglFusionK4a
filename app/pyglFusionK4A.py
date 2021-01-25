@@ -259,15 +259,17 @@ def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, cu
 
     glBindImageTexture(4, textureDict['tracking'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8) 
 
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pReduction'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2pReduction'])
 
     glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), level)
 
-    invPose = glm.inverse(currPose)
-    view = cameraConfig['K'] * invPose
+    #invPose = glm.inverse(currPose)
+    #view = cameraConfig['K'] * invPose
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "view"), 1, False, glm.value_ptr(view))
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "pose"), 1, False, glm.value_ptr(currPose))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "K"), 1, False, glm.value_ptr(cameraConfig['K']))
+    #glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2PShader'], "pose"), 1, False, glm.value_ptr(currPose))
 
     glUniform1f(glGetUniformLocation(shaderDict['trackP2PShader'], "distThresh"), fusionConfig['distThresh'])
     glUniform1f(glGetUniformLocation(shaderDict['trackP2PShader'], "normThresh"), fusionConfig['normThresh'])
@@ -372,7 +374,7 @@ def solveP2P(shaderDict, bufferDict, level):
     # return reductionData
 
 
-def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose):
+def raycastVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose):
     glUseProgram(shaderDict['raycastVolumeShader'])
 
     glBindImageTexture(0, textureDict['volume'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG16F) 
@@ -385,10 +387,13 @@ def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
     glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volDim"), fusionConfig['volDim'][0])
     glUniform1f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "volSize"), fusionConfig['volSize'][0])
 
-    view = currPose * cameraConfig['invK']
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
+
+    #view = currPose * cameraConfig['invK']
     #print(view)
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['raycastVolumeShader'], "view"), 1, False, glm.value_ptr(view))
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['raycastVolumeShader'], "invK"), 1, False, glm.value_ptr(cameraConfig['invK']))
     glUniform3f(glGetUniformLocation(shaderDict['raycastVolumeShader'], "initOffset"), fusionConfig['initOffset'][0], fusionConfig['initOffset'][1], fusionConfig['initOffset'][2])
 
     step = np.max(fusionConfig['volDim']) / np.max(fusionConfig['volSize'])
@@ -404,19 +409,21 @@ def raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-def integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, fusionTypeFlag):
+def integrateVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, fusionTypeFlag):
     glUseProgram(shaderDict['integrateVolumeShader'])
 
     glBindImageTexture(0, textureDict['volume'], 0, GL_FALSE, 0, GL_READ_WRITE, GL_RG16F) 
     glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
     glBindImageTexture(2, textureDict['tracking'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
     glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "integrateFlag"), integrateFlag)
     glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "resetFlag"), resetFlag)
 
-    invT = glm.inverse(currPose)
+    #invT = glm.inverse(currPose)
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "invT"), 1, False, glm.value_ptr(invT))
+    #glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "invT"), 1, False, glm.value_ptr(invT))
     glUniformMatrix4fv(glGetUniformLocation(shaderDict['integrateVolumeShader'], "K"), 1, False, glm.value_ptr(cameraConfig['K']))
 
     glUniform1i(glGetUniformLocation(shaderDict['integrateVolumeShader'], "p2p"), fusionTypeFlag == 0)
@@ -462,7 +469,7 @@ def twist(xi):
 
 def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
 
-    raycastVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose)
+    raycastVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose)
     T = currPose
 
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
@@ -504,7 +511,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
     currPose = T
     if integrateFlag == True or resetFlag == True:
-        integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, 0)
+        integrateVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, 0)
 
     return currPose
 
