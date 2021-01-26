@@ -46,6 +46,43 @@ global float32_data
 float32_data = (ctypes.c_float * 256)()
 
 
+def createFrameBuffer(fbo, texList, width, height):
+
+    if (fbo == -1):
+        fbo = glGenFramebuffers(1)
+    
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+    depthTex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, depthTex)
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, int(width), int(height), 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, None)
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTex, 0)
+    for texNum in range(len(texList)):
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + texNum, GL_TEXTURE_2D, texList[texNum], 0)
+
+    status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+    if status != GL_FRAMEBUFFER_COMPLETE:
+        print("framebuffer incomplete!")
+        
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+    return fbo
+
+def generateFrameBuffers(fboDict, textureDict, cameraConfig):
+
+    indexTexture = [textureDict['indexMap']]
+    fboDict['indexMap'] = createFrameBuffer(fboDict['indexMap'], indexTexture, cameraConfig['depthWidth'] * 4, cameraConfig['depthHeight'] * 4)
+    vfTextures = [textureDict['virtualVertex'], textureDict['virtualNormal'], textureDict['virtualDepth'], textureDict['virtualColor']]
+    fboDict['virtualFrame'] = createFrameBuffer(fboDict['virtualFrame'], vfTextures, cameraConfig['depthWidth'], cameraConfig['depthHeight'])
+
+    return fboDict
 
 def createBuffer(buffer, bufferType, size, usage):
     if buffer == -1:
@@ -76,7 +113,13 @@ def generateBuffers(bufferDict, cameraConfig):
 
     bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, GL_DYNAMIC_DRAW)
     bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, GL_DYNAMIC_DRAW)
-    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 2 * 4, GL_DYNAMIC_DRAW)
+
+    # bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
+    # bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
+
+    # bufferDict['atomic0'] = createBuffer(bufferDict['atomic0'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
+    # bufferDict['atomic1'] = createBuffer(bufferDict['atomic1'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
 
     return bufferDict
 
@@ -136,6 +179,9 @@ def generateTextures(textureDict, cameraConfig, fusionConfig):
     textureDict['refNormal'] = createTexture(textureDict['refNormal'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
     textureDict['virtualNormal'] = createTexture(textureDict['virtualNormal'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
 
+    textureDict['virtualDepth'] = createTexture(textureDict['virtualDepth'], GL_TEXTURE_2D, GL_R32F, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
+    textureDict['virtualColor'] = createTexture(textureDict['virtualColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
+
     textureDict['volume'] = createTexture(textureDict['volume'], GL_TEXTURE_3D, GL_RG16F, 1, fusionConfig['volSize'][0], fusionConfig['volSize'][1], fusionConfig['volSize'][2], GL_NEAREST, GL_NEAREST)
 
     textureDict['tracking'] = createTexture(textureDict['tracking'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST_MIPMAP_NEAREST, GL_NEAREST)
@@ -146,7 +192,8 @@ def generateTextures(textureDict, cameraConfig, fusionConfig):
     #densificationFlowMap
     #textureList[7] = createTexture(textureList[7], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
- 
+    textureDict['indexMap'] = createTexture(textureDict['indexMap'], GL_TEXTURE_2D, GL_R32F, 1, int(cameraConfig['depthWidth']) * 4, int(cameraConfig['depthHeight']) * 4, 1, GL_NEAREST, GL_NEAREST)
+
     
 
 	# Allocate the immutable GPU memory storage -more efficient than mutable memory if you are not going to change image size after creation
@@ -248,7 +295,7 @@ def mipmapTextures(textureDict):
     glGenerateMipmap(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, 0)    
 
-def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, level):
+def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level):
     glUseProgram(shaderDict['trackP2PShader'])
 
     glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
@@ -373,7 +420,6 @@ def solveP2P(shaderDict, bufferDict, level):
 
     # return reductionData
 
-
 def raycastVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose):
     glUseProgram(shaderDict['raycastVolumeShader'])
 
@@ -475,7 +521,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
             
-            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, T, level)
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level)
 
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
@@ -686,6 +732,137 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
     return currPose
 
+def generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize):
+    glUseProgram(shaderDict['indexMapGeneration'])
+    glEnable(GL_DEPTH_TEST)
+
+    glBindFramebuffer(GL_FRAMEBUFFER, glBindfboDict['indexMap'])
+	
+    glClearColor(-1.0, -1.0, -1.0, -1.0)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glViewport(0, 0, cameraConfig['depthWidth'] * 4, cameraConfig['depthHeight'] * 4)
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['globalMap0'])
+
+    glUniform2f(glGetUniformLocation(shaderDict['indexMapGeneration'], "imSize"), cameraConfig['depthWidth'], cameraConfig['depthHeight'])
+    glUniform1f(glGetUniformLocation(shaderDict['indexMapGeneration'], "maxDepth"), fusionConfig['farPlane'])
+    glUniform4f(glGetUniformLocation(shaderDict['indexMapGeneration'], "cam"), cameraConfig['K'][2, 0], cameraConfig['K'][2, 1], cameraConfig['K'][0, 0], cameraConfig['K'][1, 1])
+
+
+    glDrawArrays(GL_POINTS, 0, mapSize)    
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount):
+    glUseProgram(shaderDict['globalMapUpdate'])
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
+    glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, int(mapSize), GL_DYNAMIC_COPY)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['globalMap0'])
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, bufferDict['atomic0'])
+
+    glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "timeStamp"), frameCount)
+    glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "firstFrame"), firstFrame)
+
+    glBindImageTexture(0, textureDict['indexMap'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F) 
+    glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(2, textureDict['refNormal'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(3, textureDict['lastColor'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
+
+    compWidth = int((cameraConfig['depthWidth'][0]/32.0)) 
+    compHeight = int((cameraConfig['depthHeight'][1]/32.0))
+
+    glDispatchCompute(compWidth, compHeight, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
+    tempData = glGetBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    mapSize = np.frombuffer(tempData, dtype=np.int32)
+
+    return mapSize
+
+def removeUnnecessaryPoints(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount):
+
+    glUseProgram(shaderDict['unnecessaryPointRemoval'])
+    glUniform1i(glGetUniformLocation(shaderDict['unnecessaryPointRemoval'], "timeStamp"), frameCount)
+    glUniform1i(glGetUniformLocation(shaderDict['unnecessaryPointRemoval'], "c_stable"), 10.0)
+
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 1, bufferDict['atomic1'])
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
+    glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, int(mapSize), GL_DYNAMIC_COPY)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['globalMap0'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['globalMap1'])
+
+    glDispatchCompute(int((mapSize / 400) + 0.5), 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
+    tempData = glGetBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    mapSize = np.frombuffer(tempData, dtype=np.int32)
+
+    bufferDict['atomic0'], bufferDict['atomic1'] = bufferDict['atomic0'], bufferDict['atomic1']
+    bufferDict['globalMap0'], bufferDict['globalMap1'] = bufferDict['globalMap1'], bufferDict['globalMap0']
+
+    return mapSize, bufferDict
+
+def genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount):
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fboDict['virtualFrame'])
+
+    glClearColor(0.0, 0.0, 0.0, 0.0)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glViewport(0, 0, cameraConfig['depthWidth'], cameraConfig['depthHeight'])
+
+    drawBuffs = [GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3]
+
+    glUseProgram(shaderDict['surfaceSplatting'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
+    glEnable(GL_PROGRAM_POINT_SIZE)
+    glEnable(GL_POINT_SPRITE)
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['globalMap0']) 
+
+    glDrawBuffers(4, drawBuffs)
+    glDrawArrays(GL_POINTS, 0, mapSize)
+
+    glBindTexture(GL_TEXTURE_2D, 0)
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+    glDisable(GL_PROGRAM_POINT_SIZE)
+    glDisable(GL_POINT_SPRITE)
+
+def runSplatter(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, integrateFlag, resetFlag):
+    for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
+        for iter in range(fusionConfig['iters'][level - 1]):
+        
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level)
+            p2pReduce(shaderDict, bufferDict, cameraConfig, level)
+            solveP2P(shaderDict, bufferDict, level)
+
+    generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize)
+
+    if (integrateFlag):
+        mapSize = updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount)
+    #    mapSize, bufferDict = removeUnnecessaryPoints(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount)
+
+
+    #genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount)
+
+
 def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     generateTextures(textureDict, cameraConfig, fusionConfig)
     #generateBuffers(bufferDict, cameraConfig)
@@ -696,6 +873,11 @@ def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     #currPose[3,0] = (fusionConfig['volDim'][0] / 2.0) - clickedPoint3D[0]
     #currPose[3,1] = (fusionConfig['volDim'][1] / 2.0) - clickedPoint3D[1]
     #currPose[3,2] = (fusionConfig['volDim'][2] / 2.0) - clickedPoint3D[2]
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4, glm.value_ptr(currPose))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4, glm.value_ptr(glm.inverse(currPose)))
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
     integrateFlag = 0
     resetFlag = 1
@@ -858,6 +1040,29 @@ def main():
     LDLT_shader = (Path(__file__).parent / 'shaders/LDLT.comp').read_text()
     LDLTShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(LDLT_shader, GL_COMPUTE_SHADER))
 
+    # Splatter
+    globalMapUpdate_shader = (Path(__file__).parent / 'shaders/globalMapUpdate.comp').read_text()
+    globalMapUpdateShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(globalMapUpdate_shader, GL_COMPUTE_SHADER))
+
+    indexMapGenVert_shader = (Path(__file__).parent / 'shaders/IndexMapGeneration.vert').read_text()
+
+    indexMapGenFrag_shader = (Path(__file__).parent / 'shaders/IndexMapGeneration.frag').read_text()
+
+    IndexMapGenerationShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(indexMapGenVert_shader, GL_VERTEX_SHADER),
+                                              OpenGL.GL.shaders.compileShader(indexMapGenFrag_shader, GL_FRAGMENT_SHADER))
+
+    SurfaceSplattingVert_shader = (Path(__file__).parent / 'shaders/SurfaceSplatting.vert').read_text()
+
+    SurfaceSplattingFrag_shader = (Path(__file__).parent / 'shaders/SurfaceSplatting.frag').read_text()
+
+    SurfaceSplattingShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(SurfaceSplattingVert_shader, GL_VERTEX_SHADER),
+                                              OpenGL.GL.shaders.compileShader(SurfaceSplattingFrag_shader, GL_FRAGMENT_SHADER))
+
+    UnnecessaryPointRemoval_shader = (Path(__file__).parent / 'shaders/UnnecessaryPointRemoval.comp').read_text()
+    UnnecessaryPointRemovalShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(UnnecessaryPointRemoval_shader, GL_COMPUTE_SHADER))
+
+
+
     if useLiveKinect == False:
         k4a = PyK4APlayback("C:\data\outSess1.mkv")
         k4a.open()
@@ -903,7 +1108,11 @@ def main():
         'reduceP2PShader' : reduceP2PShader,
         'trackP2VShader' : trackP2VShader,
         'reduceP2VShader' : reduceP2VShader,
-        'LDLTShader' : LDLTShader
+        'LDLTShader' : LDLTShader,
+        'globalMapUpdate' : globalMapUpdateShader,
+        'indexMapGeneration' : IndexMapGenerationShader,
+        'surfaceSplatting' : SurfaceSplattingShader,
+        'unnecessaryPointRemoval' : UnnecessaryPointRemovalShader
     }
 
     bufferDict = {
@@ -913,7 +1122,11 @@ def main():
         'p2vRedOut' : -1,
         'test' : -1,
         'outBuf' : -1,
-        'poseBuffer' : -1
+        'poseBuffer' : -1,
+        'globalMap0' : -1,
+        'globalMap1' : -1,
+        'atomic0' : -1,
+        'atomic1' : -1
     }
 
     textureDict = {
@@ -925,14 +1138,22 @@ def main():
         'lastDepth' : -1,
         'nextDepth' : -1,
         'refVertex' : -1,
-        'virtualVertex' : -1,
         'refNormal' : -1,
+        'virtualVertex' : -1,
         'virtualNormal' : -1,
+        'virtualDepth' : -1,
+        'virtualColor' : -1,
         'mappingC2D' : -1,
         'mappingD2C' : -1,
         'xyLUT' : -1, 
         'tracking' : -1,
-        'volume' : -1
+        'volume' : -1,
+        'indexMap' : -1
+    }
+
+    fboDict = {
+        'indexMap' : -1,
+        'virtualFrame' : -1
     }
 #        'iters' : (2, 5, 10),
 
@@ -945,7 +1166,8 @@ def main():
         'distThresh' : 0.05,
         'normThresh' : 0.9,
         'nearPlane' : 0.1,
-        'farPlane' : 1.0
+        'farPlane' : 1.0,
+        'maxMapSize' : 5000000
     }
 
     cameraConfig = {
@@ -972,7 +1194,8 @@ def main():
 
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
-    glBufferData(GL_SHADER_STORAGE_BUFFER, 16 * 4, glm.value_ptr(initPose), GL_DYNAMIC_COPY)
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4, glm.value_ptr(initPose))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4, glm.value_ptr(glm.inverse(initPose)))
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
 
@@ -986,6 +1209,16 @@ def main():
 
     currPose = initPose
 
+    # splatter stuff
+    fboDict = generateFrameBuffers(fboDict, textureDict, cameraConfig )
+
+    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
+    # glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, 0.0, GL_DYNAMIC_COPY)
+    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
+    # glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, 0.0, GL_DYNAMIC_COPY)
+    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
     # aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
     # bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
@@ -1042,7 +1275,6 @@ def main():
         imgui.new_frame()
         
 
-        sTime = time.perf_counter()
 
         try:
             if useLiveKinect == False:
@@ -1088,6 +1320,7 @@ def main():
         #     break
 
 
+        sTime = time.perf_counter()
 
 
 
@@ -1100,6 +1333,9 @@ def main():
 
         currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #runSplatter(shaderDict, textureDict, bufferDict, cameraConfig, integrateFlag, resetFlag)
+
+
         eTime = time.perf_counter()
         print((eTime-sTime) * 1000)
         if resetFlag == True:

@@ -19,6 +19,7 @@ uniform float volSize;
 layout(std430, binding = 0) buffer poseBuffer
 {
     mat4 pose;
+    mat4 inversePose;
 };
 
 vec3 getVolumePosition(uvec3 p)

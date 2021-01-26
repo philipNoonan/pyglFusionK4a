@@ -37,6 +37,7 @@ struct reduType
 layout(std430, binding = 0) buffer poseBuffer
 {
     mat4 pose;
+    mat4 inversePose;
 };
 
 layout(std430, binding = 1) buffer TrackData
@@ -75,7 +76,7 @@ void main()
                                                                                                                       //vec3 projectedVertex = opMul(Ttrack, imageLoad(refVertex, ivec2(pix)).xyz); // CHECK ME AGAINT THE OLD CRAPPY OPMUL
                 // this depth vert in global space is then prejected back to normal depth space
                 
-                vec4 projectedPos = K * inverse(pose) * projectedVertex;
+                vec4 projectedPos = K * inversePose * projectedVertex;
 
                 vec2 projPixel = vec2(projectedPos.x / projectedPos.z, projectedPos.y / projectedPos.z);
 				

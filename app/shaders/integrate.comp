@@ -23,6 +23,7 @@ uniform float maxWeight;
 layout(std430, binding = 0) buffer poseBuffer
 {
     mat4 pose;
+    mat4 inversePose;
 };
 
 vec3 projectPointImage(vec3 p, float fx, float fy, float cx, float cy)
@@ -76,7 +77,7 @@ void integrate()
         for (int cameraDevice = 0; cameraDevice < numberOfCameras; cameraDevice++)
         {
             // get world position of centre of voxel 
-            vec3 worldPos = vec3(inverse(pose) * vec4(getVolumePosition(vec3(pix)), 1.0f)).xyz;
+            vec3 worldPos = vec3(inversePose * vec4(getVolumePosition(vec3(pix)), 1.0f)).xyz;
 
 			//vec3 pixel = projectPointImage(worldPos, K[0][0], K[1][1], K[2][0], K[2][1]);
 			//vec3 pixel = projectPointImage(worldPos, 504.03, 504.251, 320.07, 317.02);
