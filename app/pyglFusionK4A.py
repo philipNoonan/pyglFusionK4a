@@ -98,7 +98,7 @@ def createBuffer(buffer, bufferType, size, usage):
 
     return bufName
 
-def generateBuffers(bufferDict, cameraConfig):
+def generateBuffers(bufferDict, cameraConfig, fusionConfig):
     
     p2pRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 8 * 4 # 8 float32 per depth pixel for reduction struct
     p2pRedOutBufSize = 32 * 4 * 4 # 32 outs per local group, upto 4 local groups running on highest def layer
@@ -115,11 +115,11 @@ def generateBuffers(bufferDict, cameraConfig):
     bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, GL_DYNAMIC_DRAW)
     bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 2 * 4, GL_DYNAMIC_DRAW)
 
-    # bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
-    # bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
 
-    # bufferDict['atomic0'] = createBuffer(bufferDict['atomic0'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
-    # bufferDict['atomic1'] = createBuffer(bufferDict['atomic1'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
+    bufferDict['atomic0'] = createBuffer(bufferDict['atomic0'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
+    bufferDict['atomic1'] = createBuffer(bufferDict['atomic1'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
 
     return bufferDict
 
@@ -736,7 +736,7 @@ def generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig,
     glUseProgram(shaderDict['indexMapGeneration'])
     glEnable(GL_DEPTH_TEST)
 
-    glBindFramebuffer(GL_FRAMEBUFFER, glBindfboDict['indexMap'])
+    glBindFramebuffer(GL_FRAMEBUFFER, fboDict['indexMap'])
 	
     glClearColor(-1.0, -1.0, -1.0, -1.0)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -750,33 +750,37 @@ def generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig,
     glUniform1f(glGetUniformLocation(shaderDict['indexMapGeneration'], "maxDepth"), fusionConfig['farPlane'])
     glUniform4f(glGetUniformLocation(shaderDict['indexMapGeneration'], "cam"), cameraConfig['K'][2, 0], cameraConfig['K'][2, 1], cameraConfig['K'][0, 0], cameraConfig['K'][1, 1])
 
-
-    glDrawArrays(GL_POINTS, 0, mapSize)    
+    glDrawArrays(GL_POINTS, 0, mapSize[0])    
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
-def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount):
+def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount, firstFrame):
     glUseProgram(shaderDict['globalMapUpdate'])
 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
 
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
-    glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, int(mapSize), GL_DYNAMIC_COPY)
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, mapSize)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['globalMap0'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['globalMap0'])
+
     glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, bufferDict['atomic0'])
 
-    glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "timeStamp"), frameCount)
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['globalMapUpdate'], "K"), 1, False, glm.value_ptr(cameraConfig['K']))
+    glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "timestamp"), frameCount)
     glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "firstFrame"), firstFrame)
+    glUniform1f(glGetUniformLocation(shaderDict['globalMapUpdate'], "sigma"), fusionConfig['sigma'])
+    glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "maxMapSize"), fusionConfig['maxMapSize'])
+    glUniform1f(glGetUniformLocation(shaderDict['globalMapUpdate'], "c_stable"), fusionConfig['c_stable'])
 
     glBindImageTexture(0, textureDict['indexMap'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F) 
     glBindImageTexture(1, textureDict['refVertex'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
     glBindImageTexture(2, textureDict['refNormal'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
     glBindImageTexture(3, textureDict['lastColor'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
 
-    compWidth = int((cameraConfig['depthWidth'][0]/32.0)) 
-    compHeight = int((cameraConfig['depthHeight'][1]/32.0))
+    compWidth = int((cameraConfig['depthWidth']/32.0) + 0.5) 
+    compHeight = int((cameraConfig['depthHeight']/32.0) + 0.5)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
@@ -785,39 +789,41 @@ def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionCon
     tempData = glGetBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
-    mapSize = np.frombuffer(tempData, dtype=np.int32)
+    mapSize = np.array(np.frombuffer(tempData, dtype=np.uint32))
 
     return mapSize
 
 def removeUnnecessaryPoints(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount):
 
     glUseProgram(shaderDict['unnecessaryPointRemoval'])
-    glUniform1i(glGetUniformLocation(shaderDict['unnecessaryPointRemoval'], "timeStamp"), frameCount)
-    glUniform1i(glGetUniformLocation(shaderDict['unnecessaryPointRemoval'], "c_stable"), 10.0)
+    glUniform1i(glGetUniformLocation(shaderDict['unnecessaryPointRemoval'], "timestamp"), frameCount)
+    glUniform1f(glGetUniformLocation(shaderDict['unnecessaryPointRemoval'], "c_stable"), fusionConfig['c_stable'])
 
+    blank = np.array([0], dtype='uint32')
     glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 1, bufferDict['atomic1'])
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
-    glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, int(mapSize), GL_DYNAMIC_COPY)
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, blank)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['globalMap0'])
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['globalMap1'])
 
-    glDispatchCompute(int((mapSize / 400) + 0.5), 1, 1)
+    glDispatchCompute(int((mapSize[0] / 400) + 0.5), 1, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
     tempData = glGetBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
-    mapSize = np.frombuffer(tempData, dtype=np.int32)
+    mapSize = np.array(np.frombuffer(tempData, dtype=np.uint32))
 
-    bufferDict['atomic0'], bufferDict['atomic1'] = bufferDict['atomic0'], bufferDict['atomic1']
+    bufferDict['atomic0'], bufferDict['atomic1'] = bufferDict['atomic1'], bufferDict['atomic0']
     bufferDict['globalMap0'], bufferDict['globalMap1'] = bufferDict['globalMap1'], bufferDict['globalMap0']
 
     return mapSize, bufferDict
 
 def genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount):
+    glUseProgram(shaderDict['surfaceSplatting'])
 
     glBindFramebuffer(GL_FRAMEBUFFER, fboDict['virtualFrame'])
 
@@ -827,25 +833,28 @@ def genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, 
 
     drawBuffs = [GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3]
 
-    glUseProgram(shaderDict['surfaceSplatting'])
+    glUniform2f(glGetUniformLocation(shaderDict['surfaceSplatting'], "imSize"), cameraConfig['depthWidth'], cameraConfig['depthHeight'])
+    glUniform1f(glGetUniformLocation(shaderDict['surfaceSplatting'], "maxDepth"), fusionConfig['farPlane'])
+    glUniform4f(glGetUniformLocation(shaderDict['surfaceSplatting'], "cam"), cameraConfig['K'][2, 0], cameraConfig['K'][2, 1], cameraConfig['K'][0, 0], cameraConfig['K'][1, 1])
+    glUniform1f(glGetUniformLocation(shaderDict['surfaceSplatting'], "c_stable"), fusionConfig['c_stable'])
+
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
 
     glEnable(GL_PROGRAM_POINT_SIZE)
-    glEnable(GL_POINT_SPRITE)
+    #glEnable(GL_POINT_SPRITE)
 
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['globalMap0']) 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['globalMap0']) 
 
     glDrawBuffers(4, drawBuffs)
-    glDrawArrays(GL_POINTS, 0, mapSize)
+    glDrawArrays(GL_POINTS, 0, mapSize[0])
 
-    glBindTexture(GL_TEXTURE_2D, 0)
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
     glDisable(GL_PROGRAM_POINT_SIZE)
-    glDisable(GL_POINT_SPRITE)
+    #glDisable(GL_POINT_SPRITE)
 
-def runSplatter(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, integrateFlag, resetFlag):
+def runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag):
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
         
@@ -856,11 +865,13 @@ def runSplatter(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig,
     generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize)
 
     if (integrateFlag):
-        mapSize = updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount)
-    #    mapSize, bufferDict = removeUnnecessaryPoints(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount)
+        mapSize = updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount, resetFlag)
+        mapSize, bufferDict = removeUnnecessaryPoints(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount)
 
 
-    #genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount)
+    genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount)
+
+    return mapSize
 
 
 def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
@@ -888,6 +899,7 @@ def render(VAO, window, shaderDict, textureDict):
 
     glUseProgram(shaderDict['renderShader'])
     glClear(GL_COLOR_BUFFER_BIT)
+    glDisable(GL_DEPTH_TEST)
 
     w, h = glfw.get_framebuffer_size(window)
     xpos = 0
@@ -1159,15 +1171,17 @@ def main():
 
     fusionConfig = {
         'volSize' : (128, 128, 128),
-        'volDim' : (1.0, 1.0, 1.0),
+        'volDim' : (4.0, 4.0, 4.0),
         'iters' : (2, 5, 10),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
         'normThresh' : 0.9,
         'nearPlane' : 0.1,
-        'farPlane' : 1.0,
-        'maxMapSize' : 5000000
+        'farPlane' : 4.0,
+        'maxMapSize' : 5000000,
+        'c_stable' : 10.0,
+        'sigma' : 0.6
     }
 
     cameraConfig = {
@@ -1181,7 +1195,7 @@ def main():
     }
 
     textureDict = generateTextures(textureDict, cameraConfig, fusionConfig)
-    bufferDict = generateBuffers(bufferDict, cameraConfig)
+    bufferDict = generateBuffers(bufferDict, cameraConfig, fusionConfig)
 
     colorMat = np.zeros((cameraConfig['colorHeight'], cameraConfig['colorWidth'], 3), dtype = "uint8")
     useColorMat = False 
@@ -1210,15 +1224,19 @@ def main():
     currPose = initPose
 
     # splatter stuff
+    frameCount = 0
     fboDict = generateFrameBuffers(fboDict, textureDict, cameraConfig )
 
-    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
-    # glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, 0.0, GL_DYNAMIC_COPY)
-    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+    initAtomicCount = np.array([0.0], dtype='int32')
+    mapSize = np.array([1000], dtype='uint32')
 
-    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
-    # glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, 0.0, GL_DYNAMIC_COPY)
-    # glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, initAtomicCount)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, initAtomicCount)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
     # aa = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], dtype=torch.float32, device=torch.device('cuda'))
     # bb = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32, device=torch.device('cuda'))
@@ -1331,13 +1349,17 @@ def main():
 
         mipmapTextures(textureDict)
 
-        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        #runSplatter(shaderDict, textureDict, bufferDict, cameraConfig, integrateFlag, resetFlag)
-
+        
+        #if (mapSize[0] > 10000000):
+        #    mapSize[0] = 10000
+        
+        mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
+        frameCount += 1
 
         eTime = time.perf_counter()
-        print((eTime-sTime) * 1000)
+        print((eTime-sTime) * 1000, mapSize[0])
         if resetFlag == True:
             resetFlag = False
             integrateFlag = True

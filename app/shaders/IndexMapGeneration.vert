@@ -9,10 +9,10 @@ struct gMapData
 	vec4 color;	// Color
 };
 
-// Distance global map
 layout(std430, binding = 0) buffer poseBuffer
 {
 	mat4 pose;
+	mat4 inversePose;
 };
 
 // Distance global map
@@ -42,7 +42,10 @@ vec3 projectPointImage(vec3 p)
 }
 vec4 transPtForGL(vec4 v)
 {
-	v = inverse(pose) * v;
+	if (v.w == 0) {
+		return vec4(-1.0f);
+	}
+	v = inversePose * v;
 	return vec4(projectPoint(vec3(v.xy, v.z)), 1.0f);
 	//return P * vec4(v.xy, -v.z, 1.0);
 }

@@ -8,13 +8,17 @@ struct gMapData
 	vec4 norm;	// Normal
 	vec4 color;	// Color
 };
+layout(std430, binding = 0) buffer poseBuffer
+{
+	mat4 pose;
+	mat4 inversePose;
+};
 // Distance global map
-layout(std430, binding = 0) buffer gMap
+layout(std430, binding = 1) buffer gMap
 {
 	gMapData elems[];
 };
 
-uniform mat4 invT;
 uniform vec4 cam; // cx cy fx fy
 uniform vec2 imSize;
 uniform float maxDepth;
@@ -47,7 +51,7 @@ void main(void)
 {
 	int index = gl_VertexID;
 
-	vec4 vPosHome = invT * vec4(elems[index].vert.xyz, 1.0);
+	vec4 vPosHome = inversePose * vec4(elems[index].vert.xyz, 1.0);
 	float conf = elems[index].data.x;
 	float radius = elems[index].data.y;
 	
@@ -64,7 +68,7 @@ void main(void)
 
 		gsVert = vPosHome;
 
-		gsNorm = vec4(normalize(mat3(invT) * elems[index].norm.xyz), 0.0f);
+		gsNorm = vec4(normalize(mat3(inversePose) * elems[index].norm.xyz), 0.0f);
 
 		gsData = elems[index].data.xyzw;
 
