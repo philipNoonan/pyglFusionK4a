@@ -113,7 +113,7 @@ def generateBuffers(bufferDict, cameraConfig, fusionConfig):
 
     bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, GL_DYNAMIC_DRAW)
     bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, GL_DYNAMIC_DRAW)
-    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 2 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 4 * 4, GL_DYNAMIC_DRAW)
 
     bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
     bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
@@ -295,7 +295,7 @@ def mipmapTextures(textureDict):
     glGenerateMipmap(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, 0)    
 
-def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level):
+def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, useSplat, level):
     glUseProgram(shaderDict['trackP2PShader'])
 
     glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
@@ -311,6 +311,7 @@ def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, le
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2pReduction'])
 
     glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), level)
+    glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "useSplat"), useSplat)
 
     #invPose = glm.inverse(currPose)
     #view = cameraConfig['K'] * invPose
@@ -402,12 +403,14 @@ def getReductionP2P(bufferDict, level):
 
     return matA, vecb, AE, icpCount
 
-def solveP2P(shaderDict, bufferDict, level):
+def solveP2P(shaderDict, bufferDict, useSplat, finalPass, level):
     glUseProgram(shaderDict['LDLTShader'])
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pRedOut'])
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['poseBuffer'])
 
     glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "mip"), level)
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "useSplat"), useSplat)
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "finalPass"), finalPass)
 
     glDispatchCompute(1, 1, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
@@ -855,12 +858,15 @@ def genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, 
     #glDisable(GL_POINT_SPRITE)
 
 def runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag):
+    useSplat = 1
+    finalPass = 0
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
-        for iter in range(fusionConfig['iters'][level - 1]):
-        
-            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level)
+        for iter in range(fusionConfig['iters'][level]):
+            if (level == 0 and iter == (fusionConfig['iters'][0] - 1)):
+                finalPass = 1
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, useSplat, level)
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
-            solveP2P(shaderDict, bufferDict, level)
+            solveP2P(shaderDict, bufferDict, useSplat, finalPass, level)
 
     generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize)
 
@@ -888,6 +894,7 @@ def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4, glm.value_ptr(currPose))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4, glm.value_ptr(glm.inverse(currPose)))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 2, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
     integrateFlag = 0
@@ -1171,7 +1178,7 @@ def main():
 
     fusionConfig = {
         'volSize' : (128, 128, 128),
-        'volDim' : (4.0, 4.0, 4.0),
+        'volDim' : (1.0, 1.0, 1.0),
         'iters' : (2, 5, 10),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
@@ -1210,6 +1217,8 @@ def main():
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4, glm.value_ptr(initPose))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4, glm.value_ptr(glm.inverse(initPose)))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 2, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 3, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
 
@@ -1227,8 +1236,8 @@ def main():
     frameCount = 0
     fboDict = generateFrameBuffers(fboDict, textureDict, cameraConfig )
 
-    initAtomicCount = np.array([0.0], dtype='int32')
-    mapSize = np.array([1000], dtype='uint32')
+    initAtomicCount = np.array([0], dtype='uint32')
+    mapSize = np.array([0], dtype='uint32')
 
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
     glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, initAtomicCount)

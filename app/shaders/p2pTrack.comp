@@ -18,7 +18,7 @@ uniform mat4 K;
 uniform float distThresh;
 uniform float normThresh;
 uniform int mip;
-// uniform vec4 cam;
+uniform bool useSplat;
 
 // vec3 projectPointImage(vec3 p)
 // {
@@ -38,6 +38,8 @@ layout(std430, binding = 0) buffer poseBuffer
 {
     mat4 pose;
     mat4 inversePose;
+    mat4 splatPose;
+    mat4 inverseSplatPose;
 };
 
 layout(std430, binding = 1) buffer TrackData
@@ -52,9 +54,23 @@ void main()
     ivec2 imSize = imageSize(refVertex); // mipmapped sizes
     ivec2 refSize = imageSize(virtualVertex); // full depth size
 
+
+
     if (pix.x > imSize.x || pix.y > imSize.y) {
         return;
     }
+    mat4 T = mat4(1.0f);
+    mat4 invT = mat4(1.0f);
+
+    if (useSplat) {
+        T = splatPose;
+        invT = inverseSplatPose;
+    }
+    else {
+        T = pose;
+        invT = inversePose;
+    }
+
 
     for (int camera = 0; camera < numberOfCameras; camera++)
     {
@@ -71,12 +87,14 @@ void main()
             }
             else
             {
+
                 // depth vert in global space
-                vec4 projectedVertex = pose * vec4(imageLoad(refVertex, ivec2(pix)).xyz, 1.0f); // CHECK ME AGAINT THE OLD CRAPPY OPMUL
-                                                                                                                      //vec3 projectedVertex = opMul(Ttrack, imageLoad(refVertex, ivec2(pix)).xyz); // CHECK ME AGAINT THE OLD CRAPPY OPMUL
+                vec4 projectedVertex = T * vec4(imageLoad(refVertex, ivec2(pix)).xyz, 1.0f); // CHECK ME AGAINT THE OLD CRAPPY OPMUL
+                
+
                 // this depth vert in global space is then prejected back to normal depth space
                 
-                vec4 projectedPos = K * inversePose * projectedVertex;
+                vec4 projectedPos = K * invT * projectedVertex;
 
                 vec2 projPixel = vec2(projectedPos.x / projectedPos.z, projectedPos.y / projectedPos.z);
 				
@@ -106,7 +124,7 @@ void main()
 						vec3 refVert = imageLoad(virtualVertex, refPixel).xyz;
                         vec3 diff = refVert - projectedVertex.xyz;
                         vec4 currNormal = imageLoad(refNormal, ivec2(pix));
-                        vec3 projectedNormal = vec3((pose * vec4(currNormal.xyz, 0.0f)).xyz); // input mipmap sized pixel
+                        vec3 projectedNormal = vec3((T * vec4(currNormal.xyz, 0.0f)).xyz); // input mipmap sized pixel
 
 
 						//imageStore(testImage, ivec2(pix), vec4(diff, 1.0f));

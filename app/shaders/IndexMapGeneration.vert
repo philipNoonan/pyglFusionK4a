@@ -11,8 +11,10 @@ struct gMapData
 
 layout(std430, binding = 0) buffer poseBuffer
 {
-	mat4 pose;
-	mat4 inversePose;
+    mat4 pose;
+    mat4 inversePose;
+    mat4 splatPose;
+    mat4 inverseSplatPose;
 };
 
 // Distance global map

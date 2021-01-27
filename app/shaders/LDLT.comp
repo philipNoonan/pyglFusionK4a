@@ -11,9 +11,13 @@ layout(std430, binding = 1) buffer poseBuffer
 {
     mat4 pose;
     mat4 inversePose;
+    mat4 splatPose;
+    mat4 inverseSplatPose;
 };
 
 uniform int mip;
+uniform bool useSplat;
+uniform bool finalPass;
 
 void reshapeData(out float A[6][6], out float b[6]) {
     
@@ -153,11 +157,23 @@ void main() {
         x[0],  x[1],                 x[2],                1.0
     );
 
-    mat4 outPose = delta * pose;
+    if (useSplat) {
+        mat4 outPose = delta * splatPose;
+        splatPose = outPose;
+        inverseSplatPose = inverse(splatPose);
+        if (finalPass) { // and if AE is low (the track was good)
+            pose = pose * splatPose;
+            inversePose = inverse(pose);
+            splatPose = mat4(1.0f);
+            inverseSplatPose = mat4(1.0f);
+        }
+    }
+    else {
+        mat4 outPose = delta * pose;
+        pose = outPose;
+        inversePose = inverse(pose);
+    }
 
-
-    pose = outPose;
-    inversePose = inverse(pose);
 
 
 
