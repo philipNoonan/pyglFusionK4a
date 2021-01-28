@@ -798,7 +798,7 @@ def generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig,
 
 def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount, firstFrame):
     glUseProgram(shaderDict['globalMapUpdate'])
-    sTime = time.perf_counter()
+    #sTime = time.perf_counter()
 
     
     glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, bufferDict['atomic0'])
@@ -807,7 +807,7 @@ def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionCon
     glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, mapSize)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
-    print((time.perf_counter() - sTime) * 1000)
+    #print((time.perf_counter() - sTime) * 1000)
 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
 
@@ -1399,7 +1399,7 @@ def main():
         #     break
 
 
-        #sTime = time.perf_counter()
+        sTime = time.perf_counter()
 
 
 
@@ -1410,16 +1410,16 @@ def main():
 
         mipmapTextures(textureDict)
 
-        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         
         #if (mapSize[0] > 10000000):
         #    mapSize[0] = 10000
         
-        #mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
+        mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
         frameCount += 1
 
-        #eTime = time.perf_counter()
+        eTime = time.perf_counter()
         #print((eTime-sTime) * 1000, mapSize[0])
         if resetFlag == True:
             resetFlag = False
