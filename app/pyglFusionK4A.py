@@ -1105,7 +1105,7 @@ def main():
     LDLTShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(LDLT_shader, GL_COMPUTE_SHADER))
 
     # Splatter
-    globalMapUpdate_shader = (Path(__file__).parent / 'shaders/globalMapUpdate.comp').read_text()
+    globalMapUpdate_shader = (Path(__file__).parent / 'shaders/GlobalMapUpdate.comp').read_text()
     globalMapUpdateShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(globalMapUpdate_shader, GL_COMPUTE_SHADER))
 
     indexMapGenVert_shader = (Path(__file__).parent / 'shaders/IndexMapGeneration.vert').read_text()
@@ -1410,13 +1410,13 @@ def main():
 
         mipmapTextures(textureDict)
 
-        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        
+        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+
         #if (mapSize[0] > 10000000):
         #    mapSize[0] = 10000
         
-        mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
+        #mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
         frameCount += 1
 
         eTime = time.perf_counter()
