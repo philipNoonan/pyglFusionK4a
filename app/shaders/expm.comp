@@ -1,17 +1,26 @@
 #version 430
 layout (local_size_x = 1, local_size_y = 1) in;
 
-layout(std430, binding = 1) buffer poseBuffer
+layout(std430, binding = 0) buffer poseBuffer
 {
     mat4 pose;
     mat4 inversePose;
     mat4 splatPose;
     mat4 inverseSplatPose;
+    float result[6];
 };
 
-uniform mat4 inputMat;
+uniform int finalPass;
 
 float eps = 2.220446049250313E-016;
+
+mat4 twist(float xi[6]) {
+    return mat4(0.0,    xi[2],  -xi[1],   0.0, 
+               -xi[2],   0.0,     xi[0],  0.0,
+                xi[1],  -xi[0],   0.0,    0.0,
+                xi[3],   xi[4],   xi[5],  0.0);
+}
+
 
 bool isSignificant(mat4 r, mat4 s) {
     bool value = false;
@@ -38,11 +47,23 @@ void main() {
 
     while (isSignificant(e, f)) {
         e = e + f;
-        f = inputMat * f;
+        mat4 tr = twist(result);
+        f = tr * f;
         f = f / float(k);
         k = k + 1;
     }
 
-    splatPose = e;
+    
+    splatPose = e * pose;
+
+    if (finalPass == 1) {
+        pose = splatPose;
+        inversePose = inverse(pose);
+        splatPose = mat4(1.0f);
+        inverseSplatPose = mat4(1.0f);
+        for (int i = 0; i < 6; i++) {
+            result[i] = 0.0f;
+        }
+    }
 
 }

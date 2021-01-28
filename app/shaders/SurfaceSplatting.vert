@@ -14,6 +14,7 @@ layout(std430, binding = 0) buffer poseBuffer
     mat4 inversePose;
     mat4 splatPose;
     mat4 inverseSplatPose;
+    float result[6];
 };
 // Distance global map
 layout(std430, binding = 1) buffer gMap

@@ -113,7 +113,7 @@ def generateBuffers(bufferDict, cameraConfig, fusionConfig):
 
     bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, GL_DYNAMIC_DRAW)
     bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, GL_DYNAMIC_DRAW)
-    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, 16 * 4 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, (16 * 4 * 4) + (6 * 4), GL_DYNAMIC_DRAW)
 
     bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
     bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
@@ -295,7 +295,7 @@ def mipmapTextures(textureDict):
     glGenerateMipmap(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, 0)    
 
-def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, useSplat, level):
+def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, fusionType, level):
     glUseProgram(shaderDict['trackP2PShader'])
 
     glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
@@ -311,7 +311,7 @@ def p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, us
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2pReduction'])
 
     glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "mip"), level)
-    glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "useSplat"), useSplat)
+    glUniform1i(glGetUniformLocation(shaderDict['trackP2PShader'], "fusionType"), fusionType)
 
     #invPose = glm.inverse(currPose)
     #view = cameraConfig['K'] * invPose
@@ -403,13 +403,13 @@ def getReductionP2P(bufferDict, level):
 
     return matA, vecb, AE, icpCount
 
-def solveP2P(shaderDict, bufferDict, useSplat, finalPass, level):
+def solveP2P(shaderDict, bufferDict, fusionType, finalPass, level):
     glUseProgram(shaderDict['LDLTShader'])
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2pRedOut'])
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['poseBuffer'])
 
     glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "mip"), level)
-    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "useSplat"), useSplat)
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "fusionType"), fusionType)
     glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "finalPass"), finalPass)
 
     glDispatchCompute(1, 1, 1)
@@ -564,7 +564,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
     return currPose
 
-def trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, tempT, level):
+def trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level):
     glUseProgram(shaderDict['trackP2VShader'])
 
     glActiveTexture(GL_TEXTURE0)
@@ -576,9 +576,10 @@ def trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, te
     glBindImageTexture(2, textureDict['virtualNormal'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
     glBindImageTexture(3, textureDict['tracking'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8) 
 
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2vReduction'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2vReduction'])
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2VShader'], "T"), 1, False, glm.value_ptr(tempT))
+    #glUniformMatrix4fv(glGetUniformLocation(shaderDict['trackP2VShader'], "T"), 1, False, glm.value_ptr(tempT))
     glUniform3f(glGetUniformLocation(shaderDict['trackP2VShader'], "volDim"), fusionConfig['volDim'][0], fusionConfig['volDim'][1], fusionConfig['volDim'][2])
     glUniform3f(glGetUniformLocation(shaderDict['trackP2VShader'], "volSize"), fusionConfig['volSize'][0], fusionConfig['volSize'][1], fusionConfig['volSize'][2])
     glUniform1i(glGetUniformLocation(shaderDict['trackP2VShader'], "mip"), level)
@@ -596,10 +597,23 @@ def reduceP2V(shaderDict, bufferDict, cameraConfig, level):
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2vReduction'])
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['p2vRedOut'])
 
-    glUniform2i(glGetUniformLocation(shaderDict['reduceP2VShader'], "imSize"), cameraConfig['depthWidth'] >> level, cameraConfig['depthHeight'] >> level)
+    glUniform2i(glGetUniformLocation(shaderDict['reduceP2VShader'], "imSize"), int(cameraConfig['depthWidth'] >> level), int(cameraConfig['depthHeight'] >> level))
 
-    glDispatchCompute(8, 1, 1)
+    glDispatchCompute(4 >> level, 1, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+def solveP2V(shaderDict, bufferDict, fusionType, finalPass, level, iter):
+    glUseProgram(shaderDict['LDLTShader'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['p2vRedOut'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['poseBuffer'])
+
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "mip"), level)
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "iter"), iter)
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "fusionType"), fusionType)
+    glUniform1i(glGetUniformLocation(shaderDict['LDLTShader'], "finalPass"), finalPass)
+
+    glDispatchCompute(1, 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)    
 
 def getReductionP2V(bufferDict):        
     #sTime = time.perf_counter()
@@ -654,96 +668,105 @@ def getReductionP2V(bufferDict):
 def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag):
 
 
-    result = np.zeros((6, 1), dtype='double')
-    resultPrev = np.zeros((6, 1), dtype='double')
+    #result = np.zeros((6, 1), dtype='double')
+    #resultPrev = np.zeros((6, 1), dtype='double')
+    finalPass = 0
+    fusionType = 1
 
-    T = currPose
-    prevT = T
+    #T = currPose
+    #prevT = T
 
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level]):
+            #if (level == 0 and iter == (fusionConfig['iters'][0] - 1)):
+            #    finalPass = 1
             
-            #sTime = time.perf_counter()
-            
-            tempTarr = linalg.expm(np.array(twist(result)))
+            #tempTarr = linalg.expm(np.array(twist(result)))
 
             glUseProgram(shaderDict['expm'])
-
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
-
-            glUniformMatrix4fv(glGetUniformLocation(shaderDict['expm'], "inputMat"), 1, False, glm.value_ptr(twist(result)))
-
+            glUniform1i(glGetUniformLocation(shaderDict['expm'], "finalPass"), finalPass)
+            #glUniformMatrix4fv(glGetUniformLocation(shaderDict['expm'], "inputMat"), 1, False, glm.value_ptr(twist(result)))
             glDispatchCompute(1, 1, 1)
             glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-            glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2vRedOut'])
-            tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 2, 16 * 4)
-            glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
-            reductionData = np.frombuffer(tempData, dtype=np.float32)
 
-            #eTime = time.perf_counter()
+
+
 
             # pyglm errors out with an invalid pointer on the jetson nx if we dont init all at once
-            tempTmat = glm.mat4(
-                tempTarr[0][0], tempTarr[0][1], tempTarr[0][2], tempTarr[0][3],
-                tempTarr[1][0], tempTarr[1][1], tempTarr[1][2], tempTarr[1][3],
-                tempTarr[2][0], tempTarr[2][1], tempTarr[2][2], tempTarr[2][3],
-                tempTarr[3][0], tempTarr[3][1], tempTarr[3][2], tempTarr[3][3]
-            )
+            # tempTmat = glm.mat4(
+            #     tempTarr[0][0], tempTarr[0][1], tempTarr[0][2], tempTarr[0][3],
+            #     tempTarr[1][0], tempTarr[1][1], tempTarr[1][2], tempTarr[1][3],
+            #     tempTarr[2][0], tempTarr[2][1], tempTarr[2][2], tempTarr[2][3],
+            #     tempTarr[3][0], tempTarr[3][1], tempTarr[3][2], tempTarr[3][3]
+            # )
 
-            currT = tempTmat * T
+            # currT = tempTmat * T
             
-            #print('level : ', level, (eTime - sTime) * 1000.0)
-
-            trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currT, level)
-
-
+            trackP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level)
             reduceP2V(shaderDict, bufferDict, cameraConfig, level)
+            solveP2V(shaderDict, bufferDict, fusionType, finalPass, level, iter)
 
-            A, b, AE, icpCount = getReductionP2V(bufferDict)
+            # glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
+            # tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 4, 6 * 4)
+            # glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+            # reductionData = np.frombuffer(tempData, dtype=np.float32)
+            #print(reductionData)
 
-            if (icpCount > 0):
+           # A, b, AE, icpCount = getReductionP2V(bufferDict)
 
-                scaling = 1.0
+            #print(icpCount)
 
-                if (np.max(A) != 0 and (1.0 / np.max(A)) > 0.0):
-                    scaling = np.max(A)
+            # if (icpCount > 0):
+
+            #     scaling = 1.0
+
+            #     if (np.max(A) != 0 and (1.0 / np.max(A)) > 0.0):
+            #         scaling = np.max(A)
 
 
-                A *= scaling
-                b *= scaling
+            #     A *= scaling
+            #     b *= scaling
 
-                adjA = A + (iter * np.identity(6, dtype='double'))
+            #     adjA = A + (iter * np.identity(6, dtype='double'))
 
-                try:
-                    result = result - linalg.solve(adjA, b)
-                    #lu, piv = linalg.lu_factor(A)
-                    #result = linalg.lu_solve((lu, piv), b)
-                except:
-                    result = np.zeros((6, 1), dtype='double')
-                    continue
+            #     try:
+            #         result = result - linalg.solve(adjA, b)
+            #         #lu, piv = linalg.lu_factor(A)
+            #         #result = linalg.lu_solve((lu, piv), b)
+            #     except:
+            #         result = np.zeros((6, 1), dtype='double')
+            #         continue
 
-                change = result - resultPrev
-                cNorm = linalg.norm(change)
+            #     change = result - resultPrev
+            #     cNorm = linalg.norm(change)
 
-                resultPrev = result
+            #     resultPrev = result
 
-                if (cNorm < 1e-4 and AE != 0):
-                    break
+            #     if (cNorm < 1e-4 and AE != 0):
+            #         break
 
-    if (np.isnan(result).any()):
-        result = np.zeros((6, 1), dtype='double')
+    #if (np.isnan(result).any()):
+    #    result = np.zeros((6, 1), dtype='double')
 
-    lnpa2 = linalg.expm(np.array(twist(result)))
+    finalPass = 1
+    glUseProgram(shaderDict['expm'])
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+    glUniform1i(glGetUniformLocation(shaderDict['expm'], "finalPass"), finalPass)
+    glDispatchCompute(1, 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-    glnpa2 = glm.mat4(
-        lnpa2[0][0], lnpa2[0][1], lnpa2[0][2], lnpa2[0][3],
-        lnpa2[1][0], lnpa2[1][1], lnpa2[1][2], lnpa2[1][3],
-        lnpa2[2][0], lnpa2[2][1], lnpa2[2][2], lnpa2[2][3],
-        lnpa2[3][0], lnpa2[3][1], lnpa2[3][2], lnpa2[3][3]
-    )
+    #lnpa2 = linalg.expm(np.array(twist(result)))
 
-    currPose = glnpa2 * T 
+    #glnpa2 = glm.mat4(
+    #    lnpa2[0][0], lnpa2[0][1], lnpa2[0][2], lnpa2[0][3],
+    #    lnpa2[1][0], lnpa2[1][1], lnpa2[1][2], lnpa2[1][3],
+    #    lnpa2[2][0], lnpa2[2][1], lnpa2[2][2], lnpa2[2][3],
+    #    lnpa2[3][0], lnpa2[3][1], lnpa2[3][2], lnpa2[3][3]
+    #)
+
+    #currPose = glnpa2 * prevT 
                     
     if integrateFlag == True or resetFlag == True:
         integrateVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, 1)
@@ -879,15 +902,15 @@ def genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, 
     #glDisable(GL_POINT_SPRITE)
 
 def runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag):
-    useSplat = 1
+    fusionType = 2
     finalPass = 0
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level]):
             if (level == 0 and iter == (fusionConfig['iters'][0] - 1)):
                 finalPass = 1
-            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, useSplat, level)
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, fusionType, level)
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
-            solveP2P(shaderDict, bufferDict, useSplat, finalPass, level)
+            solveP2P(shaderDict, bufferDict, fusionType, finalPass, level)
     
 
 
@@ -1239,12 +1262,15 @@ def main():
     initPose[3,1] = fusionConfig['volDim'][1] / 2.0
     initPose[3,2] = 0
 
+    blankResult = np.array([0, 0, 0, 0, 0, 0], dtype='float32')
+
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4, glm.value_ptr(initPose))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4, glm.value_ptr(glm.inverse(initPose)))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 2, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 3, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 4, 6 * 4, blankResult)
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
 
@@ -1384,8 +1410,8 @@ def main():
 
         mipmapTextures(textureDict)
 
-        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         
         #if (mapSize[0] > 10000000):
         #    mapSize[0] = 10000

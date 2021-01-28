@@ -13,11 +13,13 @@ layout(std430, binding = 1) buffer poseBuffer
     mat4 inversePose;
     mat4 splatPose;
     mat4 inverseSplatPose;
+    float result[6];
 };
 
 uniform int mip;
-uniform bool useSplat;
-uniform bool finalPass;
+uniform int iter;
+uniform int fusionType;
+uniform int finalPass;
 
 void reshapeData(out float A[6][6], out float b[6]) {
     
@@ -26,9 +28,11 @@ void reshapeData(out float A[6][6], out float b[6]) {
             inputReduction[j] += inputReduction[j + (i * 32)];
         }
     }
-    for (int i = 1; i < 7; i++) {
-        b[i - 1] = inputReduction[i];
-    }
+
+    //if (inputReduction[28] <= 0) {
+    //    return;
+    //}
+
     // int shift = 7;
     // for (int i = 0; i < 6; i++) {
     //     for (int j = 0; j < 6; j++) {
@@ -37,47 +41,69 @@ void reshapeData(out float A[6][6], out float b[6]) {
     //     }
     // }
 
-    A[0][0] = inputReduction[7];
-    A[0][1] = inputReduction[8];
-    A[0][2] = inputReduction[9];
-    A[0][3] = inputReduction[10];
-    A[0][4] = inputReduction[11];
-    A[0][5] = inputReduction[12];
+    float scaling = 1.0f;
+    float adj = 0.0f;
 
-    A[1][0] = inputReduction[8];
-    A[1][1] = inputReduction[13];
-    A[1][2] = inputReduction[14];
-    A[1][3] = inputReduction[15];
-    A[1][4] = inputReduction[16];
-    A[1][5] = inputReduction[17];
+    if (fusionType == 1) {
+        float maxVal = 0.0f;
+        for (int i = 7; i < 28; i++) {
+            if (inputReduction[i] > maxVal) {
+                maxVal = inputReduction[i];
+            }
+        }
 
-    A[2][0] = inputReduction[9];
-    A[2][1] = inputReduction[14];
-    A[2][2] = inputReduction[18];
-    A[2][3] = inputReduction[19];
-    A[2][4] = inputReduction[20];
-    A[2][5] = inputReduction[21];
+        if (maxVal != 0.0f && (1.0f / maxVal) > 0.0f) {
+            scaling = maxVal;
+        } 
 
-    A[3][0] = inputReduction[10];
-    A[3][1] = inputReduction[15];
-    A[3][2] = inputReduction[19];
-    A[3][3] = inputReduction[22];
-    A[3][4] = inputReduction[23];
-    A[3][5] = inputReduction[24];
+        adj = float(iter);
+    }
 
-    A[4][0] = inputReduction[11];
-    A[4][1] = inputReduction[16];
-    A[4][2] = inputReduction[20];
-    A[4][3] = inputReduction[23];
-    A[4][4] = inputReduction[25];
-    A[4][5] = inputReduction[26];
+    for (int i = 1; i < 7; i++) {
+        b[i - 1] = inputReduction[i] * scaling;
+    }
 
-    A[5][0] = inputReduction[12];
-    A[5][1] = inputReduction[17];
-    A[5][2] = inputReduction[21];
-    A[5][3] = inputReduction[24];
-    A[5][4] = inputReduction[26];
-    A[5][5] = inputReduction[27];
+    A[0][0] = (inputReduction[7] * scaling) + adj;
+    A[0][1] = (inputReduction[8] * scaling);
+    A[0][2] = (inputReduction[9] * scaling);
+    A[0][3] = (inputReduction[10] * scaling);
+    A[0][4] = (inputReduction[11] * scaling);
+    A[0][5] = (inputReduction[12] * scaling);
+
+    A[1][0] = (inputReduction[8] * scaling);
+    A[1][1] = (inputReduction[13] * scaling) + adj;
+    A[1][2] = (inputReduction[14] * scaling);
+    A[1][3] = (inputReduction[15] * scaling);
+    A[1][4] = (inputReduction[16] * scaling);
+    A[1][5] = (inputReduction[17] * scaling);
+
+    A[2][0] = (inputReduction[9] * scaling);
+    A[2][1] = (inputReduction[14] * scaling);
+    A[2][2] = (inputReduction[18] * scaling) + adj;
+    A[2][3] = (inputReduction[19] * scaling);
+    A[2][4] = (inputReduction[20] * scaling);
+    A[2][5] = (inputReduction[21] * scaling);
+
+    A[3][0] = (inputReduction[10] * scaling);
+    A[3][1] = (inputReduction[15] * scaling);
+    A[3][2] = (inputReduction[19] * scaling);
+    A[3][3] = (inputReduction[22] * scaling) + adj;
+    A[3][4] = (inputReduction[23] * scaling);
+    A[3][5] = (inputReduction[24] * scaling);
+
+    A[4][0] = (inputReduction[11] * scaling);
+    A[4][1] = (inputReduction[16] * scaling);
+    A[4][2] = (inputReduction[20] * scaling);
+    A[4][3] = (inputReduction[23] * scaling);
+    A[4][4] = (inputReduction[25] * scaling) + adj;
+    A[4][5] = (inputReduction[26] * scaling);
+
+    A[5][0] = (inputReduction[12] * scaling);
+    A[5][1] = (inputReduction[17] * scaling);
+    A[5][2] = (inputReduction[21] * scaling);
+    A[5][3] = (inputReduction[24] * scaling);
+    A[5][4] = (inputReduction[26] * scaling);
+    A[5][5] = (inputReduction[27] * scaling) + adj;
 } 
 
 void main() {
@@ -87,6 +113,8 @@ void main() {
     float b[6];
     
     reshapeData(A, b);
+
+
 
     float L[6][6];
     float d[6];
@@ -140,7 +168,19 @@ void main() {
     x[0] = (z[0] - (L[0][1] * z[1]) - (L[0][2] * z[2]) - (L[0][3] * z[3]) - (L[0][4] * z[4]) - (L[0][5] * z[5])) / L[0][0]; 
 
     if (isnan(x[0]) || isnan(x[1]) || isnan(x[2]) || isnan(x[3]) || isnan(x[4]) || isnan(x[5])) {
+        if (fusionType == 1) {
+            for (int i = 0; i < 6; i++) {
+                result[i] = 0.0f;
+            }
+        }
         return;
+    }
+
+    if (fusionType == 1) {
+        for (int i = 0; i < 6; i++) {
+            result[i] = result[i] - x[i];
+            //resultPrev[i] = result[i];
+        }
     }
 
     float c1 = cos(-x[3]);
@@ -157,22 +197,23 @@ void main() {
         x[0],  x[1],                 x[2],                1.0
     );
 
-    if (useSplat) {
+    if (fusionType == 2) {
         mat4 outPose = delta * splatPose;
         splatPose = outPose;
         inverseSplatPose = inverse(splatPose);
-        if (finalPass) { // and if AE is low (the track was good)
+        if (finalPass == 1) { // and if AE is low (the track was good)
             pose = pose * splatPose;
             inversePose = inverse(pose);
             splatPose = mat4(1.0f);
             inverseSplatPose = mat4(1.0f);
         }
     }
-    else {
+    else if (fusionType == 0) {
         mat4 outPose = delta * pose;
         pose = outPose;
         inversePose = inverse(pose);
     }
+
 
 
 

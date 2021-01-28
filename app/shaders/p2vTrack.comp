@@ -11,6 +11,15 @@ layout(binding = 1, rgba32f) readonly uniform image2D normalMap;
 layout(binding = 2, rgba32f) writeonly uniform image2D SDFImage;
 layout(binding = 3, rgba8) writeonly uniform image2D trackImage;
 
+layout(std430, binding = 0) buffer poseBuffer
+{
+    mat4 pose;
+    mat4 inversePose;
+    mat4 splatPose;
+    mat4 inverseSplatPose;
+    float result[6];
+};
+
 struct reduSDFType
 {
     int result;
@@ -19,12 +28,12 @@ struct reduSDFType
     float J[6];
 };
 
-layout(std430, binding = 0) buffer TrackData
+layout(std430, binding = 1) buffer TrackData
 {
     reduSDFType trackOutput [];
 };
 
-uniform mat4 T;
+//uniform mat4 T;
 uniform vec3 volDim;
 uniform vec3 volSize; 
 uniform int mip;
@@ -183,7 +192,7 @@ void main()
                 vec4 cameraPoint = imageLoad(vertexMap, ivec2(pix));
                 //vec4 cameraPoint = texelFetch(vertexTextureArray, ivec3(pix, camera), mip);
 
-                vec4 projectedVertex = T * vec4(cameraPoint.xyz, 1.0f);
+                vec4 projectedVertex = splatPose * vec4(cameraPoint.xyz, 1.0f);
 
 				// imageStore(SDFImage, ivec2(pix), vec4(cameraPoint.xyz, 1.0f));
 
@@ -213,7 +222,7 @@ void main()
 
                 vec3 dSDF_dx = vec3(SDFGradient(cvp, vec3(2, 0, 0), 2), SDFGradient(cvp, vec3(0, 2, 0), 2), SDFGradient(cvp, vec3(0, 0, 2), 2));
 
-                vec3 rotatedNormal = vec3(T * vec4(normals.xyz, 0.0f)).xyz;
+                vec3 rotatedNormal = vec3(splatPose * vec4(normals.xyz, 0.0f)).xyz;
 
 
                 if (dot(dSDF_dx, rotatedNormal) < 0.8 && !any(equal(dSDF_dx, vec3(0.0f))))

@@ -20,7 +20,9 @@ layout(std430, binding = 0) buffer poseBuffer
 {
     mat4 pose;
     mat4 inversePose;
-    mat4 eyePose;
+    mat4 splatPose;
+    mat4 inverseSplatPose;
+    float result[6];
 };
 
 vec3 getVolumePosition(uvec3 p)
