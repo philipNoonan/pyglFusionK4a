@@ -509,10 +509,10 @@ def resultToMatrix(result):
 
 def twist(xi):
 
-    M = glm.mat4(0.0,    xi[2], -xi[1], 0.0, 
-    -xi[2],  0.0,    xi[0], 0.0,
-    xi[1], -xi[0],  0.0,   0.0,
-    xi[3],  xi[4],  xi[5], 0.0)
+    M = glm.mat4(0.0,    xi[2],  -xi[1],  0.0, 
+               -xi[2],   0.0,     xi[0],  0.0,
+                xi[1],  -xi[0],   0.0,    0.0,
+                xi[3],   xi[4],   xi[5],  0.0)
   
     return M
 
@@ -524,12 +524,12 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
         for iter in range(fusionConfig['iters'][level - 1]):
             
-            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, level)
+            p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, 0, level)
 
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
            # sTime = time.perf_counter()
-            solveP2P(shaderDict, bufferDict, level)
+            solveP2P(shaderDict, bufferDict, 0, 0, level)
 
         #     A, b, AE, icpCount = getReductionP2P(bufferDict, level)
         #   #  print('level : ', level, ((time.perf_counter() - sTime) * 1000))
@@ -661,11 +661,26 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     prevT = T
 
     for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
-        for iter in range(fusionConfig['iters'][level - 1]):
+        for iter in range(fusionConfig['iters'][level]):
             
             #sTime = time.perf_counter()
             
             tempTarr = linalg.expm(np.array(twist(result)))
+
+            glUseProgram(shaderDict['expm'])
+
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
+            glUniformMatrix4fv(glGetUniformLocation(shaderDict['expm'], "inputMat"), 1, False, glm.value_ptr(twist(result)))
+
+            glDispatchCompute(1, 1, 1)
+            glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['p2vRedOut'])
+            tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 2, 16 * 4)
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+            reductionData = np.frombuffer(tempData, dtype=np.float32)
+
             #eTime = time.perf_counter()
 
             # pyglm errors out with an invalid pointer on the jetson nx if we dont init all at once
@@ -731,7 +746,8 @@ def runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
     currPose = glnpa2 * T 
                     
     if integrateFlag == True or resetFlag == True:
-        integrateVolume(shaderDict, textureDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, 1)
+        integrateVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, 1)
+#def integrateVolume(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag, fusionTypeFlag):
 
     return currPose
 
@@ -759,16 +775,21 @@ def generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig,
 
 def updateGlobalMap(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, mapSize, frameCount, firstFrame):
     glUseProgram(shaderDict['globalMapUpdate'])
+    sTime = time.perf_counter()
 
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+    
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, bufferDict['atomic0'])
 
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
     glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, mapSize)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
+    print((time.perf_counter() - sTime) * 1000)
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
+
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, bufferDict['globalMap0'])
 
-    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, bufferDict['atomic0'])
 
     glUniformMatrix4fv(glGetUniformLocation(shaderDict['globalMapUpdate'], "K"), 1, False, glm.value_ptr(cameraConfig['K']))
     glUniform1i(glGetUniformLocation(shaderDict['globalMapUpdate'], "timestamp"), frameCount)
@@ -867,6 +888,8 @@ def runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusi
             p2pTrack(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, useSplat, level)
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
             solveP2P(shaderDict, bufferDict, useSplat, finalPass, level)
+    
+
 
     generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize)
 
@@ -878,7 +901,6 @@ def runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusi
     genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount)
 
     return mapSize
-
 
 def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     generateTextures(textureDict, cameraConfig, fusionConfig)
@@ -1080,6 +1102,9 @@ def main():
     UnnecessaryPointRemoval_shader = (Path(__file__).parent / 'shaders/UnnecessaryPointRemoval.comp').read_text()
     UnnecessaryPointRemovalShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(UnnecessaryPointRemoval_shader, GL_COMPUTE_SHADER))
 
+    # P2V 
+    expm_shader = (Path(__file__).parent / 'shaders/expm.comp').read_text()
+    expmShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(expm_shader, GL_COMPUTE_SHADER))
 
 
     if useLiveKinect == False:
@@ -1131,7 +1156,8 @@ def main():
         'globalMapUpdate' : globalMapUpdateShader,
         'indexMapGeneration' : IndexMapGenerationShader,
         'surfaceSplatting' : SurfaceSplattingShader,
-        'unnecessaryPointRemoval' : UnnecessaryPointRemovalShader
+        'unnecessaryPointRemoval' : UnnecessaryPointRemovalShader,
+        'expm' : expmShader
     }
 
     bufferDict = {
@@ -1347,7 +1373,7 @@ def main():
         #     break
 
 
-        sTime = time.perf_counter()
+        #sTime = time.perf_counter()
 
 
 
@@ -1359,16 +1385,16 @@ def main():
         mipmapTextures(textureDict)
 
         #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         
         #if (mapSize[0] > 10000000):
         #    mapSize[0] = 10000
         
-        mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
+        #mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
         frameCount += 1
 
-        eTime = time.perf_counter()
-        print((eTime-sTime) * 1000, mapSize[0])
+        #eTime = time.perf_counter()
+        #print((eTime-sTime) * 1000, mapSize[0])
         if resetFlag == True:
             resetFlag = False
             integrateFlag = True
