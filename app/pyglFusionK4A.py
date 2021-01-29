@@ -417,9 +417,10 @@ def solveP2P(shaderDict, bufferDict, fusionType, finalPass, level):
 
 
     # glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
-    # tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4)
+    # tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4)
     # glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
     # reductionData = np.frombuffer(tempData, dtype=np.float32)
+    # print(reductionData)
 
     # return reductionData
 
@@ -936,10 +937,15 @@ def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     #currPose[3,1] = (fusionConfig['volDim'][1] / 2.0) - clickedPoint3D[1]
     #currPose[3,2] = (fusionConfig['volDim'][2] / 2.0) - clickedPoint3D[2]
 
+
+
+    blankResult = np.array([0, 0, 0, 0, 0, 0], dtype='float32')
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4, glm.value_ptr(currPose))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4, glm.value_ptr(glm.inverse(currPose)))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 2, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 3, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 4, 6 * 4, blankResult)
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
 
     integrateFlag = 0
@@ -1410,13 +1416,13 @@ def main():
 
         mipmapTextures(textureDict)
 
-        currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
-        currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
+        #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
         #if (mapSize[0] > 10000000):
         #    mapSize[0] = 10000
         
-        #mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
+        mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
         frameCount += 1
 
         eTime = time.perf_counter()
