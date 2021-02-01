@@ -26,7 +26,7 @@ shared float S[160][32];
 
 void main()
 {
-    uint sline = gl_LocalInvocationID.x; // 0 - 111
+    uint sline = gl_LocalInvocationID.x; 
 
     if (int(gl_GlobalInvocationID.x) > imSize.x) {
         return;
@@ -41,9 +41,9 @@ void main()
     // float * jtj = sums + 7; sums[7] = jtj;
     // float * info = sums + 28; sums[28] = info; 
 
-    for (uint y = gl_WorkGroupID.x; y < imSize.y; y += gl_NumWorkGroups.x) // y = (0:8); y < 424; y += 8
+    for (uint y = gl_WorkGroupID.x; y < imSize.y; y += gl_NumWorkGroups.x) 
     {
-        for (uint x = sline; x < imSize.x; x += gl_WorkGroupSize.x) // x = (0:112); x < 512; x += 112
+        for (uint x = sline; x < imSize.x; x += gl_WorkGroupSize.x) 
         {
             reduType row = trackOutput[(y * imSize.x) + x];
             if (row.result < 1)

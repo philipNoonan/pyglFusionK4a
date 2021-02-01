@@ -401,6 +401,9 @@ def getReductionP2P(bufferDict, level):
     AE = np.sqrt(reductionData[0] / reductionData[28])
     icpCount = reductionData[28]
 
+    #print(matA)
+
+
     return matA, vecb, AE, icpCount
 
 def solveP2P(shaderDict, bufferDict, fusionType, finalPass, level):
@@ -417,7 +420,7 @@ def solveP2P(shaderDict, bufferDict, fusionType, finalPass, level):
 
 
     # glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['poseBuffer'])
-    # tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4, 16 * 4)
+    # tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 16 * 4 * 4 + 6 * 4)
     # glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
     # reductionData = np.frombuffer(tempData, dtype=np.float32)
     # print(reductionData)
@@ -529,35 +532,7 @@ def runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, curr
 
             p2pReduce(shaderDict, bufferDict, cameraConfig, level)
 
-           # sTime = time.perf_counter()
             solveP2P(shaderDict, bufferDict, 0, 0, level)
-
-        #     A, b, AE, icpCount = getReductionP2P(bufferDict, level)
-        #   #  print('level : ', level, ((time.perf_counter() - sTime) * 1000))
-        #     if (icpCount > 0):
-        #         try:
-        #             result = linalg.solve(A, b)
-        #             c, low = linalg.cho_factor(A)
-        #             res2 = linalg.cho_solve((c, low), b)
-        #             print('done')
-        #             #result = linalg.lu_solve((lu, piv), b)
-        #         except:
-        #             result = np.zeros((6, 1), dtype='double')
-        #             continue
-                
-        #         delta = resultToMatrix(result)
-        #     #     #d = glm.mat4(delta)
-
-        #         T = delta * T
-        #         #print(AE, icpCount)
-
-        #         #eTime = time.time()
-        #         #print((eTime - sTime) * 1000)
-
-        #         resNorm = linalg.norm(result)
-
-        #         if (resNorm < 1e-5 and resNorm != 0):
-        #             break
 
     currPose = T
     if integrateFlag == True or resetFlag == True:
@@ -1234,7 +1209,7 @@ def main():
     fusionConfig = {
         'volSize' : (128, 128, 128),
         'volDim' : (1.0, 1.0, 1.0),
-        'iters' : (2, 5, 10),
+        'iters' : (2, 2, 2),
         'initOffset' : (0, 0, 0),
         'maxWeight' : 100.0,
         'distThresh' : 0.05,
@@ -1416,6 +1391,8 @@ def main():
 
         mipmapTextures(textureDict)
 
+
+
         #currPose = runP2P(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
         #currPose = runP2V(shaderDict, textureDict, bufferDict, cameraConfig, fusionConfig, currPose, integrateFlag, resetFlag)
 
@@ -1424,8 +1401,8 @@ def main():
         
         mapSize = runSplatter(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, fusionConfig, mapSize, frameCount, integrateFlag, resetFlag)
         frameCount += 1
-
         eTime = time.perf_counter()
+
         #print((eTime-sTime) * 1000, mapSize[0])
         if resetFlag == True:
             resetFlag = False
@@ -1438,6 +1415,11 @@ def main():
             fusionConfig['volDim'] = (sliderDim, sliderDim, sliderDim)
             currPose, integrateFlag, resetFlag = reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D)
             volumeStatsChanged = False
+
+        if imgui.button("Integrate"):
+            integrateFlag = not integrateFlag    
+        imgui.same_line()
+        imgui.checkbox("", integrateFlag)
 
         changedDim, sliderDim = imgui.slider_float("dim", sliderDim, min_value=0.01, max_value=5.0)
 
