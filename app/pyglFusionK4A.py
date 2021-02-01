@@ -93,7 +93,7 @@ def createBuffer(buffer, bufferType, size, usage):
         bufName = glGenBuffers(1)
 
     glBindBuffer(bufferType, bufName)
-    glBufferData(bufferType, size, None, usage)
+    glBufferStorage(bufferType, size, None, usage)
     glBindBuffer(bufferType, 0)
 
     return bufName
@@ -105,21 +105,23 @@ def generateBuffers(bufferDict, cameraConfig, fusionConfig):
     p2vRedBufSize = cameraConfig['depthWidth'] * cameraConfig['depthHeight'] * 9 * 4 # 9 float32 per depth pixel for reduction struct
     p2vRedOutBufSize = 32 * 8 * 4
 
-    bufferDict['p2pReduction'] = createBuffer(bufferDict['p2pReduction'], GL_SHADER_STORAGE_BUFFER, p2pRedBufSize, GL_DYNAMIC_DRAW)
-    bufferDict['p2pRedOut'] = createBuffer(bufferDict['p2pRedOut'], GL_SHADER_STORAGE_BUFFER, p2pRedOutBufSize, GL_DYNAMIC_DRAW)
+    #flags = GL_DYNAMIC_STORAGE_BIT | 
+
+    bufferDict['p2pReduction'] = createBuffer(bufferDict['p2pReduction'], GL_SHADER_STORAGE_BUFFER, p2pRedBufSize, 0)
+    bufferDict['p2pRedOut'] = createBuffer(bufferDict['p2pRedOut'], GL_SHADER_STORAGE_BUFFER, p2pRedOutBufSize, 0)
     
-    bufferDict['p2vReduction'] = createBuffer(bufferDict['p2vReduction'], GL_SHADER_STORAGE_BUFFER, p2vRedBufSize, GL_DYNAMIC_DRAW)
-    bufferDict['p2vRedOut'] = createBuffer(bufferDict['p2vRedOut'], GL_SHADER_STORAGE_BUFFER, p2vRedOutBufSize, GL_DYNAMIC_DRAW)
+    bufferDict['p2vReduction'] = createBuffer(bufferDict['p2vReduction'], GL_SHADER_STORAGE_BUFFER, p2vRedBufSize, 0)
+    bufferDict['p2vRedOut'] = createBuffer(bufferDict['p2vRedOut'], GL_SHADER_STORAGE_BUFFER, p2vRedOutBufSize, 0)
 
-    bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, GL_DYNAMIC_DRAW)
-    bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, GL_DYNAMIC_DRAW)
-    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, (16 * 4 * 4) + (6 * 4), GL_DYNAMIC_DRAW)
+    bufferDict['test'] = createBuffer(bufferDict['test'], GL_SHADER_STORAGE_BUFFER, 32, 0)
+    bufferDict['outBuf'] = createBuffer(bufferDict['outBuf'], GL_SHADER_STORAGE_BUFFER, 36 * 4, 0)
+    bufferDict['poseBuffer'] = createBuffer(bufferDict['poseBuffer'], GL_SHADER_STORAGE_BUFFER, (16 * 4 * 4) + (6 * 4), GL_DYNAMIC_STORAGE_BIT)
 
-    bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
-    bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, GL_DYNAMIC_DRAW)
+    bufferDict['globalMap0'] = createBuffer(bufferDict['globalMap0'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, 0)
+    bufferDict['globalMap1'] = createBuffer(bufferDict['globalMap1'], GL_SHADER_STORAGE_BUFFER, fusionConfig['maxMapSize'] * 4 * 4 * 4, 0)
 
-    bufferDict['atomic0'] = createBuffer(bufferDict['atomic0'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
-    bufferDict['atomic1'] = createBuffer(bufferDict['atomic1'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_DRAW)
+    bufferDict['atomic0'] = createBuffer(bufferDict['atomic0'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_STORAGE_BIT)
+    bufferDict['atomic1'] = createBuffer(bufferDict['atomic1'], GL_ATOMIC_COUNTER_BUFFER, 4, GL_DYNAMIC_STORAGE_BIT)
 
     return bufferDict
 
@@ -255,9 +257,10 @@ def alignDepthColor(shaderDict, textureDict, cameraConfig, fusionConfig):
 
     glBindImageTexture(3, textureDict['mappingC2D'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
     glBindImageTexture(4, textureDict['mappingD2C'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+    #print(cameraConfig["colK"][2, 0], cameraConfig["colK"][2, 1], cameraConfig["colK"][0, 0], cameraConfig["colK"][1, 1])
 
     glUniformMatrix4fv(glGetUniformLocation(shaderDict['alignDepthColorShader'], "d2c"), 1, False, glm.value_ptr(cameraConfig['d2c']))
-    glUniform4f(glGetUniformLocation(shaderDict['alignDepthColorShader'], "cam"), cameraConfig["colK"][2, 0], cameraConfig["colK"][2, 1], cameraConfig["colK"][0, 0], cameraConfig["colK"][1, 1])
+    glUniform4f(glGetUniformLocation(shaderDict['alignDepthColorShader'], "cam"), 957.1860961914062, 553.4452514648438, 919.6978149414062, 919.4968872070312)
     glUniform1i(glGetUniformLocation(shaderDict['alignDepthColorShader'], "functionID"), 1)
 
     glDispatchCompute(compWidth, compHeight, 1)
@@ -815,7 +818,7 @@ def generateIndexMap(shaderDict, textureDict, bufferDict, fboDict, cameraConfig,
 
     glUniform2f(glGetUniformLocation(shaderDict['indexMapGeneration'], "imSize"), cameraConfig['depthWidth'], cameraConfig['depthHeight'])
     glUniform1f(glGetUniformLocation(shaderDict['indexMapGeneration'], "maxDepth"), fusionConfig['farPlane'])
-    glUniform4f(glGetUniformLocation(shaderDict['indexMapGeneration'], "cam"), cameraConfig['K'][2, 0], cameraConfig['K'][2, 1], cameraConfig['K'][0, 0], cameraConfig['K'][1, 1])
+    glUniform4f(glGetUniformLocation(shaderDict['indexMapGeneration'], "cam"), 320.0780029296875, 317.72021484375, 504.03192138671875, 504.2516784667969)
 
     glDrawArrays(GL_POINTS, 0, mapSize[0])    
 
@@ -907,7 +910,7 @@ def genVirtualFrame(shaderDict, textureDict, bufferDict, fboDict, cameraConfig, 
 
     glUniform2f(glGetUniformLocation(shaderDict['surfaceSplatting'], "imSize"), cameraConfig['depthWidth'], cameraConfig['depthHeight'])
     glUniform1f(glGetUniformLocation(shaderDict['surfaceSplatting'], "maxDepth"), fusionConfig['farPlane'])
-    glUniform4f(glGetUniformLocation(shaderDict['surfaceSplatting'], "cam"), cameraConfig['K'][2, 0], cameraConfig['K'][2, 1], cameraConfig['K'][0, 0], cameraConfig['K'][1, 1])
+    glUniform4f(glGetUniformLocation(shaderDict['surfaceSplatting'], "cam"), 320.0780029296875, 317.72021484375, 504.03192138671875, 504.2516784667969)
     glUniform1f(glGetUniformLocation(shaderDict['surfaceSplatting'], "c_stable"), fusionConfig['c_stable'])
 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['poseBuffer'])
@@ -971,6 +974,17 @@ def reset(textureDict, bufferDict, cameraConfig, fusionConfig, clickedPoint3D):
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 3, 16 * 4, glm.value_ptr(glm.mat4(1.0)))
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 16 * 4 * 4, 6 * 4, blankResult)
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)
+
+    initAtomicCount = np.array([0], dtype='uint32')
+    mapSize = np.array([0], dtype='uint32')
+
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic0'])
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, initAtomicCount)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
+
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, bufferDict['atomic1'])
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, 0, 4, initAtomicCount)
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0)
 
     integrateFlag = 0
     resetFlag = 1
