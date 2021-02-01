@@ -158,8 +158,8 @@ def generateTextures(textureDict, cameraConfig, fusionConfig):
     #lastColor
     textureDict['rawColor'] = createTexture(textureDict['rawColor'], GL_TEXTURE_2D, GL_RGBA8, 1, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
-    textureDict['lastColor'] = createTexture(textureDict['lastColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
-    textureDict['nextColor'] = createTexture(textureDict['nextColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['lastColor'] = createTexture(textureDict['lastColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['nextColor'] = createTexture(textureDict['nextColor'], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     
     textureDict['rawDepth'] = createTexture(textureDict['rawDepth'], GL_TEXTURE_2D, GL_R16, 1, int(cameraConfig['depthWidth']), int(cameraConfig['depthHeight']), 1, GL_NEAREST, GL_NEAREST)
     
@@ -235,18 +235,67 @@ def bilateralFilter(shaderDict, textureDict, cameraConfig):
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)    
 
-def alignDepthColor(shaderDict, textureDict, colorWidth, colorHeight, depthWidth, depthHeight):
+def alignDepthColor(shaderDict, textureDict, cameraConfig, fusionConfig):
     glUseProgram(shaderDict['alignDepthColorShader'])
 
-    glBindImageTexture(0, textureDict['filteredDepth'], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F) 
-    glBindImageTexture(1, textureDict['lastColor'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F) 
-    glBindImageTexture(2, textureDict['refVertex'], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) 
+    level = 0
+    glBindImageTexture(3, textureDict['mappingC2D'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+    glBindImageTexture(4, textureDict['mappingD2C'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+    
+    glUniform1i(glGetUniformLocation(shaderDict['alignDepthColorShader'], "functionID"), 0)
+    compWidth = int(((cameraConfig['depthWidth'] >> level) / 32.0) + 0.5)
+    compHeight = int(((cameraConfig['depthHeight'] >> level) / 32.0) + 0.5)
+    
+    glDispatchCompute(compWidth, compHeight, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
-    compWidth = int((width/32.0)+0.5)
-    compHeight = int((height/32.0)+0.5)
+    glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    glBindImageTexture(1, textureDict['rawColor'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
+    glBindImageTexture(2, textureDict['lastColor'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8) 
+
+    glBindImageTexture(3, textureDict['mappingC2D'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+    glBindImageTexture(4, textureDict['mappingD2C'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderDict['alignDepthColorShader'], "d2c"), 1, False, glm.value_ptr(cameraConfig['d2c']))
+    glUniform4f(glGetUniformLocation(shaderDict['alignDepthColorShader'], "cam"), cameraConfig["colK"][2, 0], cameraConfig["colK"][2, 1], cameraConfig["colK"][0, 0], cameraConfig["colK"][1, 1])
+    glUniform1i(glGetUniformLocation(shaderDict['alignDepthColorShader'], "functionID"), 1)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+    # for level in range((np.size(fusionConfig['iters']) - 1), -1, -1):
+        
+    #     glBindImageTexture(3, textureDict['mappingC2D'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+    #     glBindImageTexture(4, textureDict['mappingD2C'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+
+    #     glUniform1i(glGetUniformLocation(shaderDict['alignDepthColorShader'], "functionID"), 0)
+
+    #     compWidth = int(((cameraConfig['depthWidth'] >> level) / 32.0) + 0.5)
+    #     compHeight = int(((cameraConfig['depthHeight'] >> level) / 32.0) + 0.5)
+
+    #     glDispatchCompute(compWidth, compHeight, 1)
+    #     glMemoryBarrier(GL_ALL_BARRIER_BITS)
+        
+    #     colorCamPams = (
+    #         cameraConfig["colK"][2, 0] / float(1 << (level)),
+    #         cameraConfig["colK"][2, 1] / float(1 << (level)),
+    #         cameraConfig["colK"][0, 0] / float(1 << (level)),
+    #         cameraConfig["colK"][1, 1] / float(1 << (level))
+    #     )
+
+    #     glBindImageTexture(0, textureDict['refVertex'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) 
+    #     glBindImageTexture(1, textureDict['rawColor'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8) 
+    #     glBindImageTexture(2, textureDict['lastColor'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8) 
+
+    #     glBindImageTexture(3, textureDict['mappingC2D'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+    #     glBindImageTexture(4, textureDict['mappingD2C'], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16UI) 
+
+    #     glUniformMatrix4fv(glGetUniformLocation(shaderDict['alignDepthColorShader'], "d2c"), 1, False, glm.value_ptr(cameraConfig['d2c']))
+    #     glUniform4f(glGetUniformLocation(shaderDict['alignDepthColorShader'], "cam"), colorCamPams[0], colorCamPams[1], colorCamPams[2], colorCamPams[3])
+    #     glUniform1i(glGetUniformLocation(shaderDict['alignDepthColorShader'], "functionID"), 1)
+
+    #     glDispatchCompute(compWidth, compHeight, 1)
+    #     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 def depthToVertex(shaderDict, textureDict, cameraConfig, fusionConfig):
 
@@ -956,7 +1005,7 @@ def render(VAO, window, shaderDict, textureDict):
     xpos = w / 3.0
     glViewport(int(xpos), int(ypos), int(xwidth),h)
     glActiveTexture(GL_TEXTURE1)
-    glBindTexture(GL_TEXTURE_2D, textureDict['virtualNormal'])
+    glBindTexture(GL_TEXTURE_2D, textureDict['lastColor'])
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "isYFlip"), 1)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderType"), 0)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderOptions"), opts)
@@ -967,7 +1016,7 @@ def render(VAO, window, shaderDict, textureDict):
     xpos = 2 * w / 3.0
     glViewport(int(xpos), int(ypos), int(xwidth),h)
     glActiveTexture(GL_TEXTURE2)
-    glBindTexture(GL_TEXTURE_2D, textureDict['virtualVertex'])
+    glBindTexture(GL_TEXTURE_2D, textureDict['virtualColor'])
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "isYFlip"), 1)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderType"), 0)
     glUniform1i(glGetUniformLocation(shaderDict['renderShader'], "renderOptions"), opts)
@@ -1139,6 +1188,22 @@ def main():
 
     invK = glm.inverse(K)
 
+    colK = glm.mat4(1.0)
+    colK[0, 0] = colorCal[2] * 1920.0# fx
+    colK[1, 1] = colorCal[3] * 1440.0 # fy # why 1440, since we are 1080p? check the link, the umbers are there, im sure they make sense ...
+    colK[2, 0] = (colorCal[0] * 1920.0) - 0 - 0.5 # cx
+    colK[2, 1] = (colorCal[1] * 1440.0) - 180.0 - 0.5 # cy
+
+    d2c = glm.mat4(
+        cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][0], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][3], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][6], 0,
+        cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][1], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][4], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][7], 0,
+        cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][2], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][5], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Rotation"][8], 0,
+        cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Translation"][0], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Translation"][1], cal["CalibrationInformation"]["Cameras"][1]["Rt"]["Translation"][2], 1
+        )
+
+    c2d = glm.inverse(d2c)
+
+
 
     #playback.configuration["color_format"] == ImageFormat.COLOR_MJPG
     #if k4a.configuration["depth_mode"] == pyk4a.DepthMode.NFOV_UNBINNED:
@@ -1226,9 +1291,12 @@ def main():
         'depthHeight' : 576,
         'colorWidth' : 1920,
         'colorHeight' : 1080,
+        'd2c' : d2c,
+        'c2d' : c2d,
         'depthScale' : 0.001,
         'K' : K,
-        'invK' : invK
+        'invK' : invK,
+        'colK' : colK
     }
 
     textureDict = generateTextures(textureDict, cameraConfig, fusionConfig)
@@ -1348,7 +1416,7 @@ def main():
                         useColorMat = True
 
                 glActiveTexture(GL_TEXTURE0)
-                glBindTexture(GL_TEXTURE_2D, textureDict['lastColor'])
+                glBindTexture(GL_TEXTURE_2D, textureDict['rawColor'])
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), (GL_RGB, GL_RGBA)[useLiveKinect], GL_UNSIGNED_BYTE, (capture.color, colorMat)[useColorMat] )
 
             if capture.depth is not None:
@@ -1386,7 +1454,7 @@ def main():
 
         bilateralFilter(shaderDict, textureDict, cameraConfig)
         depthToVertex(shaderDict, textureDict, cameraConfig, fusionConfig)
-        #alignDepthColor(alignDepthColorShader, textureDict, colorWidth, colorHeight, depthWidth, depthHeight)
+        alignDepthColor(shaderDict, textureDict, cameraConfig, fusionConfig)
         vertexToNormal(shaderDict, textureDict, cameraConfig)
 
         mipmapTextures(textureDict)
@@ -1403,7 +1471,7 @@ def main():
         frameCount += 1
         eTime = time.perf_counter()
 
-        #print((eTime-sTime) * 1000, mapSize[0])
+        print((eTime-sTime) * 1000, mapSize[0])
         if resetFlag == True:
             resetFlag = False
             integrateFlag = True
