@@ -179,10 +179,6 @@ void main() {
     x[1] = (z[1] - (L[1][2] * z[2]) - (L[1][3] * z[3]) - (L[1][4] * z[4]) - (L[1][5] * z[5]))                    / L[1][1];
     x[0] = (z[0] - (L[0][1] * z[1]) - (L[0][2] * z[2]) - (L[0][3] * z[3]) - (L[0][4] * z[4]) - (L[0][5] * z[5])) / L[0][0]; 
 
-    for (int i = 0; i < 6; i++) {
-        result[i] = x[i];
-    }
-
     if (isnan(x[0]) || isnan(x[1]) || isnan(x[2]) || isnan(x[3]) || isnan(x[4]) || isnan(x[5])) {
         if (fusionType == 1) {
             for (int i = 0; i < 6; i++) {
