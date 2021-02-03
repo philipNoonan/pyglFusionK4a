@@ -19,7 +19,10 @@ from pyk4a import ImageFormat
 from pyk4a import Config, PyK4A
 import json
 
+
 def start(useLiveCamera):
+    global k4a
+
     if useLiveCamera == False:
         k4a = PyK4APlayback("C:\data\outSess1.mkv")
         k4a.open()
@@ -64,12 +67,16 @@ def start(useLiveCamera):
 
     c2d = glm.inverse(d2c)
 
-    return k4a, d2c, c2d, K, invK, colK
+    return d2c, c2d, K, invK, colK
 
-def getFrames(k4a, useLiveCamera):
+def getFrames(useLiveCamera):
     if useLiveCamera == False:
         capture = k4a.get_next_capture()
     else:    
         capture = k4a.get_capture()
 
     return capture    
+
+
+def stop():
+    k4a.stop()

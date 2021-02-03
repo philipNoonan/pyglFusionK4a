@@ -1,12 +1,15 @@
-import glfw
-from OpenGL.GL import *
-import OpenGL.GL.shaders
-import glm
+
 
 import track
 import frame
 import graphics
 import camera
+import person
+
+import glfw
+from OpenGL.GL import *
+import OpenGL.GL.shaders
+import glm
 
 import ctypes
 
@@ -15,7 +18,7 @@ import gc
 import math
 
 import numpy as np
-from scipy import linalg
+#from scipy import linalg
 
 from glob import glob
 import cv2
@@ -25,19 +28,6 @@ import imgui
 from imgui.integrations.glfw import GlfwRenderer
 from pathlib import Path
 
-if os.name == 'nt':
-    from ctypes import c_wchar_p, windll  
-    from ctypes.wintypes import DWORD
-    AddDllDirectory = windll.kernel32.AddDllDirectory
-    AddDllDirectory.restype = DWORD
-    AddDllDirectory.argtypes = [c_wchar_p]
-    AddDllDirectory(r"C:\Program Files\Azure Kinect SDK v1.4.1\sdk\windows-desktop\amd64\release\bin") # modify path there if required
-
-import pyk4a
-from pyk4a import PyK4APlayback
-from pyk4a import ImageFormat
-from pyk4a import Config, PyK4A
-import json
 
 #import torch
 #import torchvision
@@ -69,6 +59,7 @@ def main():
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # # load the modle on to the computation device and set to eval mode
     # model.to(device).eval()
+    
 
     # initialize glfw
     if not glfw.init():
@@ -189,7 +180,7 @@ def main():
     expm_shader = (Path(__file__).parent / 'shaders/expm.comp').read_text()
     expmShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(expm_shader, GL_COMPUTE_SHADER))
 
-    k4a, d2c, c2d, K, invK, colK = camera.start(useLiveCamera)
+    d2c, c2d, K, invK, colK = camera.start(useLiveCamera)
 
     shaderDict = {
         'renderShader' : renderShader,
@@ -377,6 +368,10 @@ def main():
     # LUTs
     #createXYLUT(k4a, textureDict, cameraConfig) <-- bug in this
 
+
+    person.init()
+
+
     while not glfw.window_should_close(window):
 
         glfw.poll_events()
@@ -387,13 +382,13 @@ def main():
 
 
         try:
-            capture = camera.getFrames(k4a, useLiveCamera)
+            capture = camera.getFrames(useLiveCamera)
             
             if capture.color is not None:
-                if useLiveCamera == False:
-                    if k4a.configuration["color_format"] == ImageFormat.COLOR_MJPG:
-                        colorMat = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
-                        useColorMat = True
+                #if useLiveCamera == False:
+                    #if k4a.configuration["color_format"] == ImageFormat.COLOR_MJPG:
+                    #    colorMat = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
+                    #    useColorMat = True
                 glActiveTexture(GL_TEXTURE0)
                 glBindTexture(GL_TEXTURE_2D, textureDict['rawColor'])
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(cameraConfig['colorWidth']), int(cameraConfig['colorHeight']), (GL_RGB, GL_RGBA)[useLiveCamera], GL_UNSIGNED_BYTE, (capture.color, colorMat)[useColorMat] )
@@ -428,7 +423,7 @@ def main():
 
 
 
-
+        person.getPose(textureDict, cameraConfig, capture.color)
 
         frame.bilateralFilter(shaderDict, textureDict, cameraConfig)
         frame.depthToVertex(shaderDict, textureDict, cameraConfig, fusionConfig)
@@ -502,7 +497,7 @@ def main():
 
     glfw.terminate()
     if useLiveCamera == True:
-        k4a.stop()
+        camera.stop()
 
     
 
